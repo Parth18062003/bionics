@@ -4,7 +4,7 @@
 Integrate all subsystems and expose functionality via UI and API.
 
 ## Modules in Scope
-- Next.js frontend
+- Tanstack Start frontend
 - REST API endpoints
 - Orchestrator ↔ Agent ↔ Memory wiring
 - Databricks execution integration
