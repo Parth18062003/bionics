@@ -36,3 +36,8 @@ Integrate all subsystems and expose functionality via UI and API.
 ## Definition of Done
 - NL requirement → validated sandbox deployment
 - UI reflects real-time task state
+UI Implementation Rule:
+- Frontend implementation MUST follow Stitch MCP design artifacts exactly
+- No layout, component, or interaction invention is allowed
+- Deviations require explicit design change approval
+

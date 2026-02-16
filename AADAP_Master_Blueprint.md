@@ -811,6 +811,28 @@ Respond: RECOVERY_ACTION [RETRY|ALTERNATIVE|ESCALATE|TERMINATE], REASONING, NEXT
 | LLM cost per task | < $2.00 average | Token usage * pricing |
 | False positive rate (validation) | < 5% | Manual review of FAIL verdicts |
 
+## Phase 6.5 — UI Design (Stitch MCP)
+
+Objective:
+Generate authoritative UI/UX design artifacts using Stitch MCP
+before frontend implementation.
+
+Inputs:
+- SYSTEM_CONSTITUTION.md
+- ARCHITECTURE.md (Presentation Layer only)
+- PHASE_7_CONTRACTS.md (UI-related sections)
+- Product UX goals
+
+Outputs:
+- Design system definition
+- Page-level layouts
+- Component inventory
+- Interaction flows
+
+Rules:
+- No frontend code is written in this phase
+- Stitch MCP is the only allowed design generator
+- Output artifacts are authoritative for Phase 7
 ---
 
 # SECTION 7 — AUTOMATED PHASE GENERATION
