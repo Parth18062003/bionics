@@ -216,10 +216,45 @@ def test_databricks_client_init():
     """DatabricksClient can be initialized directly."""
     client = DatabricksClient(
         host="https://test.cloud.databricks.com",
-        job_id="123456",
+        warehouse_id="warehouse-123",
+        cluster_id="cluster-456",
     )
     assert client._host == "https://test.cloud.databricks.com"
-    assert client._job_id == "123456"
+    assert client._warehouse_id == "warehouse-123"
+    assert client._cluster_id == "cluster-456"
+
+
+def test_databricks_client_init_with_catalog_schema():
+    """DatabricksClient accepts optional catalog and schema."""
+    client = DatabricksClient(
+        host="https://test.cloud.databricks.com",
+        warehouse_id="warehouse-123",
+        cluster_id="cluster-456",
+        catalog="main",
+        schema="default",
+    )
+    assert client._catalog == "main"
+    assert client._schema == "default"
+
+
+def test_databricks_client_init_sql_only():
+    """DatabricksClient can be initialized with only warehouse for SQL."""
+    client = DatabricksClient(
+        host="https://test.cloud.databricks.com",
+        warehouse_id="warehouse-123",
+    )
+    assert client._warehouse_id == "warehouse-123"
+    assert client._cluster_id is None
+
+
+def test_databricks_client_init_python_only():
+    """DatabricksClient can be initialized with only cluster for Python."""
+    client = DatabricksClient(
+        host="https://test.cloud.databricks.com",
+        cluster_id="cluster-456",
+    )
+    assert client._warehouse_id is None
+    assert client._cluster_id == "cluster-456"
 
 
 def test_databricks_client_from_settings_missing_host():
@@ -245,19 +280,31 @@ def test_databricks_client_lazy_workspace_client_init():
     """DatabricksClient lazily initializes the WorkspaceClient."""
     client = DatabricksClient(
         host="https://test.cloud.databricks.com",
-        job_id="123456",
+        warehouse_id="warehouse-123",
     )
     assert client._workspace_client is None
 
 
-def test_databricks_client_map_run_state():
-    """DatabricksClient correctly maps Databricks run states."""
+def test_databricks_client_map_statement_state():
+    """DatabricksClient correctly maps Databricks statement states."""
     client = DatabricksClient(
         host="https://test.cloud.databricks.com",
-        job_id="123456",
+        warehouse_id="warehouse-123",
     )
-    assert client._map_run_state("SUCCESS") == JobStatus.SUCCESS
-    assert client._map_run_state("FAILED") == JobStatus.FAILED
-    assert client._map_run_state("CANCELLED") == JobStatus.CANCELLED
-    assert client._map_run_state("RUNNING") == JobStatus.RUNNING
-    assert client._map_run_state("PENDING") == JobStatus.PENDING
+    assert client._map_statement_state("PENDING") == JobStatus.PENDING
+    assert client._map_statement_state("RUNNING") == JobStatus.RUNNING
+    assert client._map_statement_state("SUCCEEDED") == JobStatus.SUCCESS
+    assert client._map_statement_state("FAILED") == JobStatus.FAILED
+    assert client._map_statement_state("CANCELED") == JobStatus.CANCELLED
+
+
+def test_databricks_client_map_command_state():
+    """DatabricksClient correctly maps Databricks command states."""
+    client = DatabricksClient(
+        host="https://test.cloud.databricks.com",
+        cluster_id="cluster-456",
+    )
+    assert client._map_command_state("Running") == JobStatus.RUNNING
+    assert client._map_command_state("Finished") == JobStatus.SUCCESS
+    assert client._map_command_state("Error") == JobStatus.FAILED
+    assert client._map_command_state("Cancelled") == JobStatus.CANCELLED

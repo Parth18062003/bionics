@@ -10,10 +10,21 @@ Enforces:
 - INV-05: Sandbox isolated from production data
 - Correlation ID forwarded via custom tags
 
+Supports:
+- SQL execution via SQL Warehouse (Statement Execution API)
+- Python execution via Compute Cluster (Command Execution API)
+
 Usage:
     client = MockDatabricksClient()
     result = await client.submit_job(task_id, code, "SANDBOX")
     status = await client.get_job_status(result.job_id)
+
+    # Real client:
+    client = DatabricksClient.from_settings()
+    # SQL execution
+    result = await client.submit_job(task_id, "SELECT 1", "SANDBOX", language="sql")
+    # Python execution
+    result = await client.submit_job(task_id, "print('hello')", "SANDBOX", language="python")
 """
 
 from __future__ import annotations
@@ -117,8 +128,24 @@ class BaseDatabricksClient(abc.ABC):
         code: str,
         environment: str,
         correlation_id: str | None = None,
+        language: str = "sql",
     ) -> JobSubmission:
-        """Submit code for execution on Databricks."""
+        """
+        Submit code for execution on Databricks.
+
+        Parameters
+        ----------
+        task_id
+            Unique task identifier.
+        code
+            Code to execute (SQL or Python).
+        environment
+            Execution environment (SANDBOX or PRODUCTION).
+        correlation_id
+            Optional correlation ID for tracing.
+        language
+            Language of the code: "sql" or "python". Default is "sql".
+        """
         ...
 
     @abc.abstractmethod
@@ -160,6 +187,7 @@ class MockDatabricksClient(BaseDatabricksClient):
         code: str,
         environment: str,
         correlation_id: str | None = None,
+        language: str = "sql",
     ) -> JobSubmission:
         """Submit a mock job. Validates environment per INV-05."""
         self._validate_environment(environment)
@@ -167,7 +195,6 @@ class MockDatabricksClient(BaseDatabricksClient):
         job_id = f"mock-job-{uuid.uuid4().hex[:12]}"
 
         with create_span("databricks.submit", job_id=job_id) as span:
-            # Build tracing headers for the "outgoing" call
             ctx = TracingContext(correlation_id=correlation_id)
             trace_headers = ctx.inject_headers({})
 
@@ -178,6 +205,7 @@ class MockDatabricksClient(BaseDatabricksClient):
                 "status": JobStatus.PENDING,
                 "correlation_id": correlation_id,
                 "trace_headers": trace_headers,
+                "language": language,
             }
 
         logger.info(
@@ -236,28 +264,61 @@ class MockDatabricksClient(BaseDatabricksClient):
 
 class DatabricksClient(BaseDatabricksClient):
     """
-    Real Databricks client using databricks-sdk.
+    Real Databricks client supporting both SQL and Python execution.
 
-    Authenticates via CLI (already authenticated device).
-    Requires the following environment variables:
+    SQL Execution:
+        - Uses Statement Execution API with SQL Warehouse
+        - Requires AADAP_DATABRICKS_WAREHOUSE_ID
+
+    Python Execution:
+        - Uses Command Execution API with Compute Cluster
+        - Requires AADAP_DATABRICKS_CLUSTER_ID
+
+    Authentication via CLI (already authenticated device).
+
+    Required environment variables:
         - AADAP_DATABRICKS_HOST
-        - AADAP_DATABRICKS_JOB_ID
+
+    Optional (for SQL):
+        - AADAP_DATABRICKS_WAREHOUSE_ID
+        - AADAP_DATABRICKS_CATALOG
+        - AADAP_DATABRICKS_SCHEMA
+
+    Optional (for Python):
+        - AADAP_DATABRICKS_CLUSTER_ID
     """
 
-    _RUN_STATE_MAP = {
+    _STATEMENT_STATE_MAP = {
         "PENDING": JobStatus.PENDING,
         "RUNNING": JobStatus.RUNNING,
-        "TERMINATED": JobStatus.SUCCESS,
-        "SKIPPED": JobStatus.CANCELLED,
-        "INTERNAL_ERROR": JobStatus.FAILED,
+        "SUCCEEDED": JobStatus.SUCCESS,
+        "FAILED": JobStatus.FAILED,
+        "CANCELED": JobStatus.CANCELLED,
+        "CLOSED": JobStatus.SUCCESS,
     }
 
-    def __init__(self, host: str, job_id: str) -> None:
+    _COMMAND_STATE_MAP = {
+        "Running": JobStatus.RUNNING,
+        "Finished": JobStatus.SUCCESS,
+        "Error": JobStatus.FAILED,
+        "Cancelled": JobStatus.CANCELLED,
+    }
+
+    def __init__(
+        self,
+        host: str,
+        warehouse_id: str | None = None,
+        cluster_id: str | None = None,
+        catalog: str | None = None,
+        schema: str | None = None,
+    ) -> None:
         self._host = host
-        self._job_id = job_id
+        self._warehouse_id = warehouse_id
+        self._cluster_id = cluster_id
+        self._catalog = catalog
+        self._schema = schema
         self._workspace_client = None
-        self._api_client = None
-        self._run_info_cache: dict[str, dict[str, Any]] = {}
+        self._execution_cache: dict[str, dict[str, Any]] = {}
 
     @classmethod
     def from_settings(cls) -> "DatabricksClient":
@@ -267,13 +328,12 @@ class DatabricksClient(BaseDatabricksClient):
             raise ValueError(
                 "AADAP_DATABRICKS_HOST is required for DatabricksClient"
             )
-        if not settings.databricks_job_id:
-            raise ValueError(
-                "AADAP_DATABRICKS_JOB_ID is required for DatabricksClient"
-            )
         return cls(
             host=settings.databricks_host,
-            job_id=settings.databricks_job_id,
+            warehouse_id=settings.databricks_warehouse_id,
+            cluster_id=settings.databricks_cluster_id,
+            catalog=settings.databricks_catalog,
+            schema=settings.databricks_schema,
         )
 
     def _get_workspace_client(self):
@@ -283,28 +343,13 @@ class DatabricksClient(BaseDatabricksClient):
             self._workspace_client = WorkspaceClient(host=self._host)
         return self._workspace_client
 
-    def _get_api_client(self):
-        """Lazily initialize the Databricks API client for runs."""
-        if self._api_client is None:
-            from databricks.sdk.core import Config
-            from databricks.sdk.service.jobs import JobsAPI
-            config = Config(host=self._host)
-            self._api_client = JobsAPI(config)
-        return self._api_client
+    def _map_statement_state(self, state: str) -> JobStatus:
+        """Map Databricks statement state to JobStatus enum."""
+        return self._STATEMENT_STATE_MAP.get(state.upper(), JobStatus.PENDING)
 
-    def _map_run_state(self, state: str) -> JobStatus:
-        """Map Databricks run state to JobStatus enum."""
-        if state == "SUCCESS":
-            return JobStatus.SUCCESS
-        if state in ("FAILED", "INTERNAL_ERROR"):
-            return JobStatus.FAILED
-        if state == "CANCELLED":
-            return JobStatus.CANCELLED
-        if state in ("PENDING", "QUEUED"):
-            return JobStatus.PENDING
-        if state in ("RUNNING", "TERMINATING"):
-            return JobStatus.RUNNING
-        return JobStatus.PENDING
+    def _map_command_state(self, state: str) -> JobStatus:
+        """Map Databricks command state to JobStatus enum."""
+        return self._COMMAND_STATE_MAP.get(state, JobStatus.PENDING)
 
     async def submit_job(
         self,
@@ -312,127 +357,384 @@ class DatabricksClient(BaseDatabricksClient):
         code: str,
         environment: str,
         correlation_id: str | None = None,
+        language: str = "sql",
     ) -> JobSubmission:
-        """Submit code for execution on Databricks."""
+        """
+        Submit code for execution on Databricks.
+
+        For SQL: Uses Statement Execution API with SQL Warehouse.
+        For Python: Uses Command Execution API with Compute Cluster.
+        """
         self._validate_environment(environment)
+
+        if language.lower() == "python":
+            return await self._submit_python(task_id, code, environment, correlation_id)
+        else:
+            return await self._submit_sql(task_id, code, environment, correlation_id)
+
+    async def _submit_sql(
+        self,
+        task_id: uuid.UUID,
+        code: str,
+        environment: str,
+        correlation_id: str | None = None,
+    ) -> JobSubmission:
+        """Submit SQL code via Statement Execution API."""
+        if not self._warehouse_id:
+            raise ValueError(
+                "AADAP_DATABRICKS_WAREHOUSE_ID is required for SQL execution"
+            )
 
         w = self._get_workspace_client()
 
-        with create_span("databricks.submit", task_id=str(task_id)) as span:
+        with create_span("databricks.sql_submit", task_id=str(task_id)) as span:
             ctx = TracingContext(correlation_id=correlation_id)
             trace_headers = ctx.inject_headers({})
 
-            notebook_params = {
-                "task_id": str(task_id),
-                "environment": environment.upper(),
-                "code": code,
-            }
-
             logger.info(
-                "databricks.job_submitting",
+                "databricks.sql_submitting",
                 task_id=str(task_id),
                 environment=environment,
+                warehouse_id=self._warehouse_id,
                 correlation_id=correlation_id,
             )
 
             import asyncio
+
+            wait_timeout = "50s"
+            on_wait_timeout = "CANCEL"
+
             response = await asyncio.to_thread(
-                w.jobs.run_now,
-                job_id=int(self._job_id),
-                notebook_params=notebook_params,
+                w.statement_execution.execute_statement,
+                statement=code,
+                warehouse_id=self._warehouse_id,
+                catalog=self._catalog,
+                schema=self._schema,
+                wait_timeout=wait_timeout,
+                on_wait_timeout=on_wait_timeout,
             )
 
-            run_id = str(response.run_id)
+            statement_id = response.statement_id
 
-            self._run_info_cache[run_id] = {
+            self._execution_cache[statement_id] = {
                 "task_id": task_id,
                 "environment": environment.upper(),
                 "correlation_id": correlation_id,
                 "trace_headers": trace_headers,
+                "code": code,
+                "language": "sql",
             }
 
             logger.info(
-                "databricks.job_submitted",
-                run_id=run_id,
+                "databricks.sql_submitted",
+                statement_id=statement_id,
                 task_id=str(task_id),
                 environment=environment,
                 correlation_id=correlation_id,
             )
 
             return JobSubmission(
-                job_id=run_id,
+                job_id=statement_id,
+                task_id=task_id,
+                environment=environment.upper(),
+            )
+
+    async def _submit_python(
+        self,
+        task_id: uuid.UUID,
+        code: str,
+        environment: str,
+        correlation_id: str | None = None,
+    ) -> JobSubmission:
+        """Submit Python code via Command Execution API."""
+        if not self._cluster_id:
+            raise ValueError(
+                "AADAP_DATABRICKS_CLUSTER_ID is required for Python execution"
+            )
+
+        w = self._get_workspace_client()
+
+        with create_span("databricks.python_submit", task_id=str(task_id)) as span:
+            ctx = TracingContext(correlation_id=correlation_id)
+            trace_headers = ctx.inject_headers({})
+
+            logger.info(
+                "databricks.python_submitting",
+                task_id=str(task_id),
+                environment=environment,
+                cluster_id=self._cluster_id,
+                correlation_id=correlation_id,
+            )
+
+            import asyncio
+
+            context_response = await asyncio.to_thread(
+                w.command_execution.create_context,
+                cluster_id=self._cluster_id,
+                language="python",
+            )
+
+            context_id = context_response.id
+
+            command_response = await asyncio.to_thread(
+                w.command_execution.execute_command,
+                cluster_id=self._cluster_id,
+                context_id=context_id,
+                language="python",
+                command=code,
+            )
+
+            command_id = command_response.id
+
+            self._execution_cache[command_id] = {
+                "task_id": task_id,
+                "environment": environment.upper(),
+                "correlation_id": correlation_id,
+                "trace_headers": trace_headers,
+                "code": code,
+                "language": "python",
+                "context_id": context_id,
+                "cluster_id": self._cluster_id,
+            }
+
+            logger.info(
+                "databricks.python_submitted",
+                command_id=command_id,
+                context_id=context_id,
+                task_id=str(task_id),
+                environment=environment,
+                correlation_id=correlation_id,
+            )
+
+            return JobSubmission(
+                job_id=command_id,
                 task_id=task_id,
                 environment=environment.upper(),
             )
 
     async def get_job_status(self, job_id: str) -> JobStatus:
         """Poll the current status of a submitted job."""
+        execution_info = self._execution_cache.get(job_id, {})
+        language = execution_info.get("language", "sql")
+
+        if language == "python":
+            return await self._get_python_status(job_id, execution_info)
+        else:
+            return await self._get_sql_status(job_id)
+
+    async def _get_sql_status(self, statement_id: str) -> JobStatus:
+        """Get status of a SQL statement."""
         w = self._get_workspace_client()
 
         import asyncio
-        run = await asyncio.to_thread(
-            w.jobs.get_run,
-            run_id=int(job_id),
+        statement = await asyncio.to_thread(
+            w.statement_execution.get_statement,
+            statement_id=statement_id,
         )
 
-        state = run.state
-        if state and state.result_state:
-            return self._map_run_state(state.result_state.value)
-        if state and state.life_cycle_state:
-            return self._map_run_state(state.life_cycle_state.value)
+        if statement.status:
+            state = statement.status.state
+            if state:
+                return self._map_statement_state(state.value)
 
         return JobStatus.PENDING
 
-    async def get_job_output(self, job_id: str) -> JobResult:
-        """Retrieve the output of a completed job."""
+    async def _get_python_status(self, command_id: str, execution_info: dict) -> JobStatus:
+        """Get status of a Python command."""
         w = self._get_workspace_client()
-        status = await self.get_job_status(job_id)
+        cluster_id = execution_info.get("cluster_id")
+        context_id = execution_info.get("context_id")
+
+        if not cluster_id or not context_id:
+            return JobStatus.FAILED
 
         import asyncio
-        run = await asyncio.to_thread(
-            w.jobs.get_run,
-            run_id=int(job_id),
+        try:
+            command = await asyncio.to_thread(
+                w.command_execution.get_command,
+                cluster_id=cluster_id,
+                context_id=context_id,
+                command_id=command_id,
+            )
+
+            if command.status:
+                return self._map_command_state(command.status.value)
+
+            return JobStatus.PENDING
+        except Exception as e:
+            logger.warning(
+                "databricks.python_status_error",
+                command_id=command_id,
+                error=str(e),
+            )
+            return JobStatus.FAILED
+
+    async def get_job_output(self, job_id: str) -> JobResult:
+        """Retrieve the output of a completed job."""
+        execution_info = self._execution_cache.get(job_id, {})
+        language = execution_info.get("language", "sql")
+
+        if language == "python":
+            return await self._get_python_output(job_id, execution_info)
+        else:
+            return await self._get_sql_output(job_id, execution_info)
+
+    async def _get_sql_output(self, statement_id: str, execution_info: dict) -> JobResult:
+        """Get output of a SQL statement."""
+        w = self._get_workspace_client()
+        status = await self._get_sql_status(statement_id)
+
+        import asyncio
+        statement = await asyncio.to_thread(
+            w.statement_execution.get_statement,
+            statement_id=statement_id,
         )
 
         duration_ms = None
-        if run.start_time and run.end_time:
-            duration_ms = run.end_time - run.start_time
+        if statement.status:
+            if statement.status.start_time and statement.status.end_time:
+                start = statement.status.start_time
+                end = statement.status.end_time
+                duration_ms = int((end - start).total_seconds() * 1000)
 
         output = None
         error = None
 
         if status == JobStatus.FAILED:
-            if run.state and run.state.state_message:
-                error = run.state.state_message
+            if statement.status and statement.status.error:
+                error_msg = statement.status.error
+                if hasattr(error_msg, 'message'):
+                    error = error_msg.message
+                else:
+                    error = str(error_msg)
             else:
-                error = "Databricks job execution failed"
+                error = "Databricks statement execution failed"
         else:
-            try:
-                run_output = await asyncio.to_thread(
-                    w.jobs.get_run_output,
-                    run_id=int(job_id),
-                )
-                if run_output and run_output.notebook_output:
-                    output = run_output.notebook_output.result
-                    if run_output.notebook_output.truncated:
-                        output = (output or "") + "\n[Output truncated]"
-            except Exception as e:
-                logger.warning(
-                    "databricks.output_unavailable",
-                    run_id=job_id,
-                    error=str(e),
-                )
-
-        run_info = self._run_info_cache.get(job_id, {})
+            if statement.result:
+                result_data = statement.result
+                if hasattr(result_data, 'data_array') and result_data.data_array:
+                    output = self._format_result_data(
+                        result_data.data_array,
+                        result_data.row_count if hasattr(result_data, 'row_count') else None,
+                    )
+                elif hasattr(result_data, 'chunks') and result_data.chunks:
+                    output = "[Results available via chunk links]"
+                else:
+                    output = "Statement executed successfully (no data returned)"
 
         return JobResult(
-            job_id=job_id,
+            job_id=statement_id,
             status=status,
             output=output,
             error=error,
             duration_ms=duration_ms,
             metadata={
-                "environment": run_info.get("environment"),
-                "run_name": run.run_name,
+                "environment": execution_info.get("environment"),
+                "language": "sql",
+                "warehouse_id": self._warehouse_id,
+                "catalog": self._catalog,
+                "schema": self._schema,
             },
         )
+
+    async def _get_python_output(self, command_id: str, execution_info: dict) -> JobResult:
+        """Get output of a Python command."""
+        w = self._get_workspace_client()
+        status = await self._get_python_status(command_id, execution_info)
+
+        cluster_id = execution_info.get("cluster_id")
+        context_id = execution_info.get("context_id")
+
+        output = None
+        error = None
+        duration_ms = None
+
+        if not cluster_id or not context_id:
+            return JobResult(
+                job_id=command_id,
+                status=JobStatus.FAILED,
+                error="Missing cluster_id or context_id",
+                metadata={"language": "python"},
+            )
+
+        import asyncio
+        try:
+            command = await asyncio.to_thread(
+                w.command_execution.get_command,
+                cluster_id=cluster_id,
+                context_id=context_id,
+                command_id=command_id,
+            )
+
+            if command.results:
+                results = command.results
+                if hasattr(results, 'data') and results.data:
+                    output = str(results.data)
+                elif hasattr(results, 'result_type'):
+                    if results.result_type and results.result_type.value == "text":
+                        output = str(results.data) if hasattr(results, 'data') else "Execution completed"
+                    elif results.result_type and results.result_type.value == "error":
+                        error = str(results.cause) if hasattr(results, 'cause') else "Python execution error"
+                        output = str(results.summary) if hasattr(results, 'summary') else None
+                else:
+                    output = "Python execution completed"
+            elif status == JobStatus.FAILED:
+                error = "Python command execution failed"
+
+        except Exception as e:
+            logger.warning(
+                "databricks.python_output_error",
+                command_id=command_id,
+                error=str(e),
+            )
+            if status == JobStatus.SUCCESS:
+                output = "Python execution completed (output unavailable)"
+            else:
+                error = str(e)
+
+        return JobResult(
+            job_id=command_id,
+            status=status,
+            output=output,
+            error=error,
+            duration_ms=duration_ms,
+            metadata={
+                "environment": execution_info.get("environment"),
+                "language": "python",
+                "cluster_id": cluster_id,
+                "context_id": context_id,
+            },
+        )
+
+    def _format_result_data(
+        self,
+        data_array: list[Any] | None,
+        row_count: int | None,
+    ) -> str:
+        """Format statement result data as a readable string."""
+        if not data_array:
+            return "Statement executed successfully (empty result)"
+
+        import json
+
+        formatted_rows = []
+        for row in data_array[:100]:
+            if hasattr(row, '__iter__') and not isinstance(row, str):
+                row_values = []
+                for val in row:
+                    if val is None:
+                        row_values.append("NULL")
+                    elif isinstance(val, (list, dict)):
+                        row_values.append(json.dumps(val))
+                    else:
+                        row_values.append(str(val))
+                formatted_rows.append(", ".join(row_values))
+            else:
+                formatted_rows.append(str(row))
+
+        result = "\n".join(formatted_rows)
+
+        if row_count and row_count > 100:
+            result += f"\n... ({row_count - 100} more rows)"
+
+        return result

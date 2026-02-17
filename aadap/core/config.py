@@ -95,7 +95,10 @@ class Settings(BaseSettings):
 
     # ── Databricks (L3: Integration) ──────────────────────────────────────
     databricks_host: str | None = None
-    databricks_job_id: str | None = None
+    databricks_warehouse_id: str | None = None
+    databricks_cluster_id: str | None = None
+    databricks_catalog: str | None = None
+    databricks_schema: str | None = None
 
 
 @lru_cache(maxsize=1)
