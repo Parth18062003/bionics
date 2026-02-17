@@ -6,19 +6,29 @@ Converts text into vector representations for Tier 2 similarity search.
 Design:
 - Protocol-based ``EmbeddingProvider`` for backend flexibility.
 - Default ``MockEmbeddingProvider`` uses deterministic hashing (test-safe).
-- Real provider (Azure OpenAI ada-002) deferred to integration phase.
+- ``AzureOpenAIEmbeddingProvider`` for real Azure OpenAI embeddings.
 
 Usage:
     from aadap.memory.embeddings import EmbeddingService, MockEmbeddingProvider
 
     service = EmbeddingService(provider=MockEmbeddingProvider())
     vector = await service.embed("some text")
+
+    # Real provider:
+    from aadap.memory.embeddings import AzureOpenAIEmbeddingProvider
+    provider = AzureOpenAIEmbeddingProvider.from_settings()
+    service = EmbeddingService(provider=provider)
 """
 
 from __future__ import annotations
 
 import hashlib
 from typing import Protocol, runtime_checkable
+
+from aadap.core.config import get_settings
+from aadap.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 # ── Constants ───────────────────────────────────────────────────────────
@@ -129,3 +139,154 @@ class EmbeddingService:
             if not t or not t.strip():
                 raise ValueError(f"Text at index {i} is empty or whitespace-only.")
         return await self._provider.embed_batch(texts)
+
+
+# ── Azure OpenAI Embedding Provider ───────────────────────────────────────
+
+
+class AzureOpenAIEmbeddingProvider:
+    """
+    Real Azure OpenAI embedding provider.
+
+    Uses Azure OpenAI embedding models (e.g., text-embedding-ada-002,
+    text-embedding-3-small, text-embedding-3-large).
+
+    Requires the following environment variables:
+        - AADAP_AZURE_OPENAI_API_KEY
+        - AADAP_AZURE_OPENAI_ENDPOINT
+        - AADAP_AZURE_OPENAI_EMBEDDING_DEPLOYMENT
+    """
+
+    EMBEDDING_DIMENSIONS = {
+        "text-embedding-ada-002": 1536,
+        "text-embedding-3-small": 1536,
+        "text-embedding-3-large": 3072,
+    }
+
+    def __init__(
+        self,
+        api_key: str,
+        endpoint: str,
+        api_version: str,
+        deployment_name: str,
+        dimension: int | None = None,
+    ) -> None:
+        self._api_key = api_key
+        self._endpoint = endpoint
+        self._api_version = api_version
+        self._deployment_name = deployment_name
+        self._dimension = dimension or self._get_default_dimension(deployment_name)
+        self._client = None
+
+    @classmethod
+    def from_settings(cls) -> "AzureOpenAIEmbeddingProvider":
+        """Create an AzureOpenAIEmbeddingProvider from application settings."""
+        settings = get_settings()
+        if not settings.azure_openai_api_key:
+            raise ValueError(
+                "AADAP_AZURE_OPENAI_API_KEY is required for AzureOpenAIEmbeddingProvider"
+            )
+        if not settings.azure_openai_endpoint:
+            raise ValueError(
+                "AADAP_AZURE_OPENAI_ENDPOINT is required for AzureOpenAIEmbeddingProvider"
+            )
+        if not settings.azure_openai_embedding_deployment:
+            raise ValueError(
+                "AADAP_AZURE_OPENAI_EMBEDDING_DEPLOYMENT is required for AzureOpenAIEmbeddingProvider"
+            )
+        return cls(
+            api_key=settings.azure_openai_api_key.get_secret_value(),
+            endpoint=settings.azure_openai_endpoint,
+            api_version=settings.azure_openai_api_version,
+            deployment_name=settings.azure_openai_embedding_deployment,
+        )
+
+    def _get_default_dimension(self, deployment_name: str) -> int:
+        """Get the default dimension for a known embedding model."""
+        for model_name, dim in self.EMBEDDING_DIMENSIONS.items():
+            if model_name in deployment_name.lower():
+                return dim
+        return DEFAULT_EMBEDDING_DIMENSION
+
+    def _get_client(self):
+        """Lazily initialize the OpenAI client."""
+        if self._client is None:
+            from openai import AsyncAzureOpenAI
+            self._client = AsyncAzureOpenAI(
+                api_key=self._api_key,
+                azure_endpoint=self._endpoint,
+                api_version=self._api_version,
+            )
+        return self._client
+
+    @property
+    def dimension(self) -> int:
+        """Dimensionality of output vectors."""
+        return self._dimension
+
+    async def embed(self, text: str) -> list[float]:
+        """Embed a single text string using Azure OpenAI."""
+        client = self._get_client()
+
+        logger.debug(
+            "embedding.embed.start",
+            deployment=self._deployment_name,
+            text_length=len(text),
+        )
+
+        try:
+            response = await client.embeddings.create(
+                model=self._deployment_name,
+                input=text,
+            )
+
+            embedding = response.data[0].embedding
+
+            logger.debug(
+                "embedding.embed.success",
+                deployment=self._deployment_name,
+                embedding_dim=len(embedding),
+            )
+
+            return list(embedding)
+        except Exception as exc:
+            logger.error(
+                "embedding.embed.error",
+                deployment=self._deployment_name,
+                error=str(exc),
+            )
+            raise
+
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Embed multiple texts in a single API call."""
+        client = self._get_client()
+
+        logger.debug(
+            "embedding.embed_batch.start",
+            deployment=self._deployment_name,
+            batch_size=len(texts),
+        )
+
+        try:
+            response = await client.embeddings.create(
+                model=self._deployment_name,
+                input=texts,
+            )
+
+            results = [list(d.embedding) for d in response.data]
+
+            logger.debug(
+                "embedding.embed_batch.success",
+                deployment=self._deployment_name,
+                batch_size=len(results),
+            )
+
+            return results
+        except Exception as exc:
+            logger.error(
+                "embedding.embed_batch.error",
+                deployment=self._deployment_name,
+                batch_size=len(texts),
+                error=str(exc),
+            )
+            raise

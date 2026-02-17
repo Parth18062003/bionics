@@ -19,6 +19,7 @@ import pytest
 from aadap.integrations.databricks_client import (
     BaseDatabricksClient,
     DatabricksEnvironmentError,
+    DatabricksClient,
     JobResult,
     JobStatus,
     JobSubmission,
@@ -206,3 +207,57 @@ def test_base_client_is_abstract():
     """BaseDatabricksClient cannot be instantiated directly."""
     with pytest.raises(TypeError):
         BaseDatabricksClient()
+
+
+# ── DatabricksClient Tests ───────────────────────────────────────────────
+
+
+def test_databricks_client_init():
+    """DatabricksClient can be initialized directly."""
+    client = DatabricksClient(
+        host="https://test.cloud.databricks.com",
+        job_id="123456",
+    )
+    assert client._host == "https://test.cloud.databricks.com"
+    assert client._job_id == "123456"
+
+
+def test_databricks_client_from_settings_missing_host():
+    """DatabricksClient.from_settings raises when host is missing."""
+    import os
+    original = os.environ.get("AADAP_DATABRICKS_HOST")
+    if "AADAP_DATABRICKS_HOST" in os.environ:
+        del os.environ["AADAP_DATABRICKS_HOST"]
+
+    from aadap.core.config import get_settings
+    get_settings.cache_clear()
+
+    try:
+        with pytest.raises(ValueError, match="AADAP_DATABRICKS_HOST"):
+            DatabricksClient.from_settings()
+    finally:
+        if original:
+            os.environ["AADAP_DATABRICKS_HOST"] = original
+        get_settings.cache_clear()
+
+
+def test_databricks_client_lazy_workspace_client_init():
+    """DatabricksClient lazily initializes the WorkspaceClient."""
+    client = DatabricksClient(
+        host="https://test.cloud.databricks.com",
+        job_id="123456",
+    )
+    assert client._workspace_client is None
+
+
+def test_databricks_client_map_run_state():
+    """DatabricksClient correctly maps Databricks run states."""
+    client = DatabricksClient(
+        host="https://test.cloud.databricks.com",
+        job_id="123456",
+    )
+    assert client._map_run_state("SUCCESS") == JobStatus.SUCCESS
+    assert client._map_run_state("FAILED") == JobStatus.FAILED
+    assert client._map_run_state("CANCELLED") == JobStatus.CANCELLED
+    assert client._map_run_state("RUNNING") == JobStatus.RUNNING
+    assert client._map_run_state("PENDING") == JobStatus.PENDING

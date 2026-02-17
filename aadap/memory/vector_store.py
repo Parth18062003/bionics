@@ -1,12 +1,12 @@
 """
 AADAP — Vector Store
 =====================
-pgvector-backed Tier 2 operational store for memory entities.
+ChromaDB-backed Tier 2 operational store for memory entities.
 
 Invariants enforced:
-- INV-08: Retrieval similarity ≥ 0.85 (SYSTEM_CONSTITUTION.md)
+- INV-08: Retrieval similarity >= 0.85 (SYSTEM_CONSTITUTION.md)
 - Deprecated entities excluded from all searches
-- Staleness < 90 days (DATA_AND_STATE.md §Vector Retrieval Rules)
+- Staleness < 90 days (DATA_AND_STATE.md Section:Vector Retrieval Rules)
 - Provenance required on every entity
 
 Usage:
@@ -24,8 +24,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import chromadb
+from chromadb.config import Settings as ChromaSettings
 
-# ── Constants (non-negotiable) ──────────────────────────────────────────
 
 MIN_SIMILARITY: float = 0.85
 """INV-08: Minimum cosine similarity for retrieval.  Non-negotiable."""
@@ -33,8 +34,9 @@ MIN_SIMILARITY: float = 0.85
 MAX_STALENESS_DAYS: int = 90
 """DATA_AND_STATE.md: Maximum age for vector retrieval results."""
 
+COLLECTION_NAME: str = "aadap_memory_entities"
+"""Default ChromaDB collection name."""
 
-# ── Data Classes ────────────────────────────────────────────────────────
 
 @dataclass
 class MemoryEntity:
@@ -62,44 +64,107 @@ class SearchResult:
     similarity: float
 
 
-# ── Vector Store ────────────────────────────────────────────────────────
-
 class VectorStore:
     """
-    In-memory vector store implementing the pgvector interface contract.
+    ChromaDB-backed vector store implementing the vector store interface contract.
 
-    Production deployment uses PostgreSQL + pgvector extension.  This
-    implementation provides the full contract for Phase 6 validation
-    and unit testing without requiring a live database.
+    Uses ChromaDB (free/local) with persistent storage. All invariants are
+    enforced architecturally, not by caller convention.
 
-    All invariants are enforced architecturally, not by caller convention.
+    Configuration:
+        persist_directory: Optional path for ChromaDB data persistence.
+                          If None, uses in-memory ephemeral storage.
+        collection_name: Name of the ChromaDB collection (default: aadap_memory_entities)
     """
 
-    def __init__(self) -> None:
-        self._entities: dict[str, MemoryEntity] = {}
+    def __init__(
+        self,
+        persist_directory: str | None = None,
+        collection_name: str | None = None,
+    ) -> None:
+        if persist_directory:
+            self._client = chromadb.PersistentClient(
+                path=persist_directory,
+                settings=ChromaSettings(anonymized_telemetry=False),
+            )
+        else:
+            self._client = chromadb.EphemeralClient(
+                settings=ChromaSettings(anonymized_telemetry=False),
+            )
 
-    # ── Store ────────────────────────────────────────────────────────────
+        self._collection_name = collection_name or f"{COLLECTION_NAME}_{uuid.uuid4().hex}"
+        self._collection = self._client.get_or_create_collection(
+            name=self._collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+        self._entities_cache: dict[str, MemoryEntity] = {}
+
+    def _entity_to_metadata(self, entity: MemoryEntity) -> dict[str, Any]:
+        """Convert MemoryEntity to ChromaDB-compatible metadata dict."""
+        return {
+            "content": entity.content,
+            "entity_type": entity.entity_type,
+            "provenance": entity.provenance,
+            "confidence": entity.confidence,
+            "use_count": entity.use_count,
+            "validation_pass_rate": entity.validation_pass_rate,
+            "is_deprecated": entity.is_deprecated,
+            "created_at": entity.created_at.isoformat(),
+            "updated_at": entity.updated_at.isoformat(),
+            "metadata_json": str(entity.metadata),
+        }
+
+    def _metadata_to_entity(
+        self, entity_id: str, embedding: list[float], metadata: dict[str, Any]
+    ) -> MemoryEntity:
+        """Convert ChromaDB metadata back to MemoryEntity."""
+        import ast
+
+        return MemoryEntity(
+            id=entity_id,
+            content=metadata.get("content", ""),
+            embedding=embedding,
+            entity_type=metadata.get("entity_type", ""),
+            provenance=metadata.get("provenance", ""),
+            confidence=float(metadata.get("confidence", 1.0)),
+            use_count=int(metadata.get("use_count", 0)),
+            validation_pass_rate=float(metadata.get("validation_pass_rate", 1.0)),
+            is_deprecated=bool(metadata.get("is_deprecated", False)),
+            metadata=ast.literal_eval(metadata.get("metadata_json", "{}")),
+            created_at=datetime.fromisoformat(metadata["created_at"])
+            if "created_at" in metadata
+            else datetime.now(timezone.utc),
+            updated_at=datetime.fromisoformat(metadata["updated_at"])
+            if "updated_at" in metadata
+            else datetime.now(timezone.utc),
+        )
 
     async def store(self, entity: MemoryEntity) -> str:
         """
         Persist a memory entity.
 
         Raises:
-            ValueError: If provenance is missing (DATA_AND_STATE.md §Vector Retrieval Rules).
+            ValueError: If provenance is missing (DATA_AND_STATE.md Section:Vector Retrieval Rules).
         """
         if not entity.embedding:
             raise ValueError("Embedding vector must not be empty.")
         if not entity.provenance or not entity.provenance.strip():
             raise ValueError(
                 "Provenance is required for every memory entity "
-                "(DATA_AND_STATE.md §Vector Retrieval Rules)."
+                "(DATA_AND_STATE.md Section:Vector Retrieval Rules)."
             )
 
         entity.updated_at = datetime.now(timezone.utc)
-        self._entities[entity.id] = entity
-        return entity.id
+        metadata = self._entity_to_metadata(entity)
 
-    # ── Search ───────────────────────────────────────────────────────────
+        self._collection.upsert(
+            ids=[entity.id],
+            embeddings=[entity.embedding],
+            metadatas=[metadata],
+            documents=[entity.content],
+        )
+        self._entities_cache[entity.id] = entity
+        return entity.id
 
     async def search(
         self,
@@ -111,90 +176,142 @@ class VectorStore:
         Cosine similarity search with invariant enforcement.
 
         Guarantees:
-        - Results have similarity ≥ ``MIN_SIMILARITY`` (INV-08, hardcoded floor)
+        - Results have similarity >= MIN_SIMILARITY (INV-08, hardcoded floor)
         - Deprecated entities are never returned
         - Stale entities (> 90 days) are never returned
         """
-        # Enforce INV-08 floor — callers cannot weaken the threshold
         effective_min = max(min_similarity, MIN_SIMILARITY)
         now = datetime.now(timezone.utc)
         staleness_cutoff = now - timedelta(days=MAX_STALENESS_DAYS)
 
-        results: list[SearchResult] = []
-        for entity in self._entities.values():
-            # Gate 1: deprecated exclusion
-            if entity.is_deprecated:
-                continue
-            # Gate 2: staleness filter
-            if entity.created_at < staleness_cutoff:
-                continue
-            # Gate 3: similarity threshold (INV-08)
-            sim = self._cosine_similarity(query_embedding, entity.embedding)
-            if sim < effective_min:
-                continue
-            results.append(SearchResult(entity=entity, similarity=sim))
+        fetch_limit = max(limit * 10, 100)
 
-        # Sort by similarity descending
-        results.sort(key=lambda r: r.similarity, reverse=True)
-        return results[:limit]
+        results = self._collection.query(
+            query_embeddings=[query_embedding],
+            n_results=fetch_limit,
+            include=["embeddings", "metadatas", "distances"],
+        )
 
-    # ── Get ──────────────────────────────────────────────────────────────
+        search_results: list[SearchResult] = []
+
+        if not results["ids"] or not results["ids"][0]:
+            return []
+
+        ids = results["ids"][0]
+        embeddings_data = results.get("embeddings")
+        embeddings = embeddings_data[0] if embeddings_data else []
+        metadatas_data = results.get("metadatas")
+        metadatas = metadatas_data[0] if metadatas_data else []
+        distances_data = results.get("distances")
+        distances = distances_data[0] if distances_data else []
+
+        for i, entity_id in enumerate(ids):
+            metadata = metadatas[i] if i < len(metadatas) else {}
+            distance = distances[i] if i < len(distances) else 1.0
+            embedding = embeddings[i] if i < len(embeddings) else []
+
+            if metadata.get("is_deprecated", False):
+                continue
+
+            created_at_str = metadata.get("created_at", "")
+            if created_at_str:
+                try:
+                    created_at = datetime.fromisoformat(created_at_str)
+                    if created_at < staleness_cutoff:
+                        continue
+                except (ValueError, TypeError):
+                    pass
+
+            similarity = 1.0 - distance
+            if similarity < effective_min:
+                continue
+
+            entity = self._metadata_to_entity(
+                entity_id,
+                list(embedding) if embedding is not None and len(embedding) > 0 else [],
+                metadata,
+            )
+            search_results.append(SearchResult(entity=entity, similarity=similarity))
+
+        search_results.sort(key=lambda r: r.similarity, reverse=True)
+        return search_results[:limit]
 
     async def get(self, entity_id: str) -> MemoryEntity | None:
         """Retrieve entity by ID.  Returns None if not found."""
-        return self._entities.get(entity_id)
+        if entity_id in self._entities_cache:
+            return self._entities_cache[entity_id]
 
-    # ── Promote ─────────────────────────────────────────────────────────
+        try:
+            results = self._collection.get(
+                ids=[entity_id],
+                include=["embeddings", "metadatas"],
+            )
+            if not results["ids"]:
+                return None
+
+            metadata = results["metadatas"][0] if results["metadatas"] else {}
+            emb_data = results.get("embeddings")
+            embedding = emb_data[0] if emb_data else []
+            entity = self._metadata_to_entity(
+                entity_id,
+                list(embedding) if embedding is not None and len(embedding) > 0 else [],
+                metadata,
+            )
+            self._entities_cache[entity_id] = entity
+            return entity
+        except Exception:
+            return None
 
     async def promote(self, entity_id: str) -> None:
         """
         Mark an entity as promoted / trusted.
 
-        Promotion criteria (DATA_AND_STATE.md §Memory Governance):
-        - ≥ 3 successful uses
-        - ≥ 90% validation pass rate
+        Promotion criteria (DATA_AND_STATE.md Section:Memory Governance):
+        - >= 3 successful uses
+        - >= 90% validation pass rate
         - No critical failures in 30 days
 
         Validation of criteria is the caller's responsibility; this method
         records the promotion.
         """
-        entity = self._entities.get(entity_id)
+        entity = await self.get(entity_id)
         if entity is None:
             raise KeyError(f"Entity {entity_id} not found.")
         entity.metadata["promoted"] = True
         entity.metadata["promoted_at"] = datetime.now(timezone.utc).isoformat()
         entity.updated_at = datetime.now(timezone.utc)
-
-    # ── Deprecate ───────────────────────────────────────────────────────
+        await self.store(entity)
 
     async def deprecate(self, entity_id: str) -> None:
         """
         Mark an entity as deprecated.  It will no longer appear in search results.
 
-        Deprecation criteria (DATA_AND_STATE.md §Memory Governance):
-        - ≥ 2 validation failures
+        Deprecation criteria (DATA_AND_STATE.md Section:Memory Governance):
+        - >= 2 validation failures
         - Outdated schema / API
         - Confidence < 0.6
         """
-        entity = self._entities.get(entity_id)
+        entity = await self.get(entity_id)
         if entity is None:
             raise KeyError(f"Entity {entity_id} not found.")
         entity.is_deprecated = True
         entity.metadata["deprecated_at"] = datetime.now(timezone.utc).isoformat()
         entity.updated_at = datetime.now(timezone.utc)
+        await self.store(entity)
 
-    # ── Helpers ─────────────────────────────────────────────────────────
+    async def delete(self, entity_id: str) -> None:
+        """Permanently delete an entity from the store."""
+        try:
+            self._collection.delete(ids=[entity_id])
+            self._entities_cache.pop(entity_id, None)
+        except Exception:
+            pass
 
-    @staticmethod
-    def _cosine_similarity(a: list[float], b: list[float]) -> float:
-        """Compute cosine similarity between two vectors."""
-        if len(a) != len(b):
-            raise ValueError(
-                f"Vector dimension mismatch: {len(a)} vs {len(b)}"
-            )
-        dot = sum(x * y for x, y in zip(a, b))
-        mag_a = sum(x * x for x in a) ** 0.5
-        mag_b = sum(x * x for x in b) ** 0.5
-        if mag_a == 0 or mag_b == 0:
-            return 0.0
-        return dot / (mag_a * mag_b)
+    async def clear(self) -> None:
+        """Clear all entities from the collection."""
+        self._client.delete_collection(self._collection_name)
+        self._collection = self._client.get_or_create_collection(
+            name=self._collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+        self._entities_cache.clear()

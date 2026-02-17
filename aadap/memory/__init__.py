@@ -5,7 +5,7 @@ Multi-tier memory system with governance and retrieval validation.
 
 Tiers (DATA_AND_STATE.md):
 - Tier 1: Working Memory (In-Memory Store, TTL-based)
-- Tier 2: Operational Store (PostgreSQL + pgvector)
+- Tier 2: Operational Store (ChromaDB vector store)
 - Tier 3: Archive (Blob Storage, 7-year retention)
 - Tier 4: Knowledge Graph (PostgreSQL graph tables)
 

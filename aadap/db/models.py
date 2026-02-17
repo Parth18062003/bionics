@@ -7,7 +7,7 @@ Entities: Task, StateTransition, Artifact, ApprovalRequest, Execution, AuditEven
 
 Design decisions:
 - JSONB ``metadata`` columns for forward-compatible extensibility (Risk R6).
-- pgvector extension created for Phase 6 readiness (Risk R2).
+- ChromaDB vector store for Phase 6 memory entities (Risk R2).
 - All timestamps are UTC with timezone.
 - StateTransition is append-only / immutable (event sourcing).
 """

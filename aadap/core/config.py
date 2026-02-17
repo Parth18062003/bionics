@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -85,6 +85,17 @@ class Settings(BaseSettings):
     # ── Server ───────────────────────────────────────────────────────────
     host: str = "0.0.0.0"
     port: int = Field(default=8000, ge=1, le=65535)
+
+    # ── Azure OpenAI (L3: Integration) ────────────────────────────────────
+    azure_openai_api_key: SecretStr | None = None
+    azure_openai_endpoint: str | None = None
+    azure_openai_api_version: str = "2024-02-01"
+    azure_openai_deployment_name: str | None = None
+    azure_openai_embedding_deployment: str | None = None
+
+    # ── Databricks (L3: Integration) ──────────────────────────────────────
+    databricks_host: str | None = None
+    databricks_job_id: str | None = None
 
 
 @lru_cache(maxsize=1)

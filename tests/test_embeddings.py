@@ -12,6 +12,7 @@ from aadap.memory.embeddings import (
     DEFAULT_EMBEDDING_DIMENSION,
     EmbeddingService,
     MockEmbeddingProvider,
+    AzureOpenAIEmbeddingProvider,
 )
 
 
@@ -129,3 +130,81 @@ async def test_service_dimension_property():
     """dimension property reflects provider dimension."""
     service = EmbeddingService(dimension=256)
     assert service.dimension == 256
+
+
+# ── AzureOpenAIEmbeddingProvider ─────────────────────────────────────────
+
+def test_azure_provider_init():
+    """AzureOpenAIEmbeddingProvider can be initialized directly."""
+    provider = AzureOpenAIEmbeddingProvider(
+        api_key="test-key",
+        endpoint="https://test.openai.azure.com/",
+        api_version="2024-02-01",
+        deployment_name="text-embedding-ada-002",
+    )
+    assert provider._api_key == "test-key"
+    assert provider._deployment_name == "text-embedding-ada-002"
+
+
+def test_azure_provider_default_dimension_ada():
+    """AzureOpenAIEmbeddingProvider infers dimension for ada-002."""
+    provider = AzureOpenAIEmbeddingProvider(
+        api_key="test-key",
+        endpoint="https://test.openai.azure.com/",
+        api_version="2024-02-01",
+        deployment_name="text-embedding-ada-002",
+    )
+    assert provider.dimension == 1536
+
+
+def test_azure_provider_default_dimension_large():
+    """AzureOpenAIEmbeddingProvider infers dimension for text-embedding-3-large."""
+    provider = AzureOpenAIEmbeddingProvider(
+        api_key="test-key",
+        endpoint="https://test.openai.azure.com/",
+        api_version="2024-02-01",
+        deployment_name="text-embedding-3-large",
+    )
+    assert provider.dimension == 3072
+
+
+def test_azure_provider_custom_dimension():
+    """AzureOpenAIEmbeddingProvider accepts custom dimension."""
+    provider = AzureOpenAIEmbeddingProvider(
+        api_key="test-key",
+        endpoint="https://test.openai.azure.com/",
+        api_version="2024-02-01",
+        deployment_name="custom-embedding",
+        dimension=512,
+    )
+    assert provider.dimension == 512
+
+
+def test_azure_provider_from_settings_missing_key():
+    """AzureOpenAIEmbeddingProvider.from_settings raises when API key is missing."""
+    import os
+    original = os.environ.get("AADAP_AZURE_OPENAI_API_KEY")
+    if "AADAP_AZURE_OPENAI_API_KEY" in os.environ:
+        del os.environ["AADAP_AZURE_OPENAI_API_KEY"]
+
+    from aadap.core.config import get_settings
+    get_settings.cache_clear()
+
+    try:
+        with pytest.raises(ValueError, match="AADAP_AZURE_OPENAI_API_KEY"):
+            AzureOpenAIEmbeddingProvider.from_settings()
+    finally:
+        if original:
+            os.environ["AADAP_AZURE_OPENAI_API_KEY"] = original
+        get_settings.cache_clear()
+
+
+def test_azure_provider_lazy_client_init():
+    """AzureOpenAIEmbeddingProvider lazily initializes the OpenAI client."""
+    provider = AzureOpenAIEmbeddingProvider(
+        api_key="test-key",
+        endpoint="https://test.openai.azure.com/",
+        api_version="2024-02-01",
+        deployment_name="text-embedding-ada-002",
+    )
+    assert provider._client is None
