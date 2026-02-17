@@ -21,7 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     # ── Extensions (pgvector for Phase 6 forward-compat) ─────────────
     op.execute("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"")
-    op.execute("CREATE EXTENSION IF NOT EXISTS \"vector\"")
+    # op.execute("CREATE EXTENSION IF NOT EXISTS \"vector\"")
 
     # ── Tasks ────────────────────────────────────────────────────────
     op.create_table(
@@ -188,5 +188,5 @@ def downgrade() -> None:
     op.drop_table("artifacts")
     op.drop_table("state_transitions")
     op.drop_table("tasks")
-    op.execute("DROP EXTENSION IF EXISTS \"vector\"")
+    # op.execute("DROP EXTENSION IF EXISTS \"vector\"")
     op.execute("DROP EXTENSION IF EXISTS \"uuid-ossp\"")

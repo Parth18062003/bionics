@@ -1,92 +1,178 @@
-import type { Task, SystemHealth, Artifact } from './types';
+/**
+ * AADAP — API Client
+ * ====================
+ * Type-safe REST client for the AADAP backend API.
+ *
+ * Trust boundary: All UI data flows through this client.
+ * Invariant: UI cannot bypass API — this is the only data access layer.
+ *
+ * Features:
+ * - Correlation ID injection on every request
+ * - Type-safe request/response handling
+ * - Centralized error handling
+ */
 
-const API_BASE_Url = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) ? import.meta.env.VITE_API_URL : '/api';
+import type {
+    Task,
+    TaskListResponse,
+    TaskCreateRequest,
+    TransitionRequest,
+    TransitionResponse,
+    TaskEvent,
+    Approval,
+    ApprovalDecisionRequest,
+    ArtifactSummary,
+    ArtifactDetail,
+    HealthResponse,
+} from './types';
 
-export class ApiClient {
-    private baseUrl: string;
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-    constructor(baseUrl: string) {
-        this.baseUrl = baseUrl;
-    }
+/**
+ * Generate a correlation ID for tracing.
+ */
+function generateCorrelationId(): string {
+    return crypto.randomUUID();
+}
 
-    private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-        const url = `${this.baseUrl}${endpoint}`;
+/**
+ * Core fetch wrapper with correlation ID injection and error handling.
+ */
+async function apiFetch<T>(
+    path: string,
+    options: RequestInit = {},
+    correlationId?: string
+): Promise<T> {
+    const cid = correlationId || generateCorrelationId();
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Correlation-ID': cid,
+        ...(options.headers as Record<string, string> || {}),
+    };
 
-        // Phase 7.4: Correlation ID Propagation
-        const correlationId = (options.headers as any)?.['X-Correlation-ID'] || crypto.randomUUID();
+    const response = await fetch(`${API_BASE}${path}`, {
+        ...options,
+        headers,
+    });
 
-        const headers = {
-            'Content-Type': 'application/json',
-            'X-Correlation-ID': correlationId,
-            ...options.headers,
-        };
-
-        // Trace logging (Console for now, could be OpenTelemetry later)
-        console.debug(`[${correlationId}] Requesting ${endpoint}`, { method: options.method || 'GET' });
-
+    if (!response.ok) {
+        const errorBody = await response.text();
+        let detail = errorBody;
         try {
-            const response = await fetch(url, { ...options, headers });
-
-            const responseCid = response.headers.get('X-Correlation-ID');
-            if (responseCid && responseCid !== correlationId) {
-                console.warn(`[${correlationId}] Response correlation ID mismatch: ${responseCid}`);
-            }
-
-            if (!response.ok) {
-                // Handle error responses
-                const errorBody = await response.text();
-                console.error(`[${correlationId}] API Error ${response.status}`, errorBody);
-                throw new Error(`API Error ${response.status}: ${errorBody}`);
-            }
-
-            return response.json();
-        } catch (error) {
-            console.error(`[${correlationId}] API Request Failed: ${endpoint}`, error);
-            throw error;
+            const parsed = JSON.parse(errorBody);
+            detail = parsed.detail || errorBody;
+        } catch {
+            // Use raw text
         }
+        throw new ApiError(response.status, detail, cid);
     }
 
-    // Tasks
-    async getTasks(filters?: { state?: string; environment?: string }): Promise<Task[]> {
-        const query = new URLSearchParams(filters as any).toString();
-        return this.request<Task[]>(`/tasks?${query}`);
-    }
+    return response.json() as Promise<T>;
+}
 
-    async getTask(id: string): Promise<Task> {
-        return this.request<Task>(`/tasks/${id}`);
-    }
-
-    async createTask(data: { description: string; environment: string; priority: string }): Promise<Task> {
-        return this.request<Task>('/tasks', {
-            method: 'POST',
-            body: JSON.stringify(data),
-        });
-    }
-
-    async updateTaskState(id: string, action: 'approve' | 'reject' | 'cancel' | 'escalate', payload?: any): Promise<Task> {
-        return this.request<Task>(`/tasks/${id}/${action}`, {
-            method: 'POST',
-            body: JSON.stringify(payload || {}),
-        });
-    }
-
-    // Artifacts
-    async getArtifact(taskId: string, artifactId: string): Promise<Artifact> {
-        return this.request<Artifact>(`/tasks/${taskId}/artifacts/${artifactId}`);
-    }
-
-    async getArtifactContent(taskId: string, artifactId: string): Promise<string> {
-        // Special case for content often returning raw text
-        const url = `${this.baseUrl}/tasks/${taskId}/artifacts/${artifactId}/content`;
-        const response = await fetch(url);
-        if (!response.ok) throw new Error('Failed to fetch artifact content');
-        return response.text();
-    }
-
-    // System
-    async getHealth(): Promise<SystemHealth> {
-        return this.request<SystemHealth>('/health');
+/**
+ * Structured API error with status, detail, and correlation ID.
+ */
+export class ApiError extends Error {
+    constructor(
+        public status: number,
+        public detail: string,
+        public correlationId: string
+    ) {
+        super(`API Error ${status}: ${detail}`);
+        this.name = 'ApiError';
     }
 }
 
-export const api = new ApiClient(API_BASE_Url);
+// ── Task API ───────────────────────────────────────────────────────────
+
+export async function createTask(data: TaskCreateRequest): Promise<Task> {
+    return apiFetch<Task>('/api/v1/tasks', {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function listTasks(
+    page = 1,
+    pageSize = 20,
+    state?: string
+): Promise<TaskListResponse> {
+    const params = new URLSearchParams({
+        page: String(page),
+        page_size: String(pageSize),
+    });
+    if (state) params.set('state', state);
+    return apiFetch<TaskListResponse>(`/api/v1/tasks?${params}`);
+}
+
+export async function getTask(taskId: string): Promise<Task> {
+    return apiFetch<Task>(`/api/v1/tasks/${taskId}`);
+}
+
+export async function transitionTask(
+    taskId: string,
+    data: TransitionRequest
+): Promise<TransitionResponse> {
+    return apiFetch<TransitionResponse>(`/api/v1/tasks/${taskId}/transition`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function getTaskEvents(taskId: string): Promise<TaskEvent[]> {
+    return apiFetch<TaskEvent[]>(`/api/v1/tasks/${taskId}/events`);
+}
+
+// ── Approval API ───────────────────────────────────────────────────────
+
+export async function listApprovals(): Promise<Approval[]> {
+    return apiFetch<Approval[]>('/api/v1/approvals');
+}
+
+export async function getApproval(approvalId: string): Promise<Approval> {
+    return apiFetch<Approval>(`/api/v1/approvals/${approvalId}`);
+}
+
+export async function approveRequest(
+    approvalId: string,
+    data: ApprovalDecisionRequest = {}
+): Promise<Approval> {
+    return apiFetch<Approval>(`/api/v1/approvals/${approvalId}/approve`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function rejectRequest(
+    approvalId: string,
+    data: ApprovalDecisionRequest = {}
+): Promise<Approval> {
+    return apiFetch<Approval>(`/api/v1/approvals/${approvalId}/reject`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+// ── Artifact API ───────────────────────────────────────────────────────
+
+export async function listArtifacts(
+    taskId: string
+): Promise<ArtifactSummary[]> {
+    return apiFetch<ArtifactSummary[]>(`/api/v1/tasks/${taskId}/artifacts`);
+}
+
+export async function getArtifact(
+    taskId: string,
+    artifactId: string
+): Promise<ArtifactDetail> {
+    return apiFetch<ArtifactDetail>(
+        `/api/v1/tasks/${taskId}/artifacts/${artifactId}`
+    );
+}
+
+// ── Health API ─────────────────────────────────────────────────────────
+
+export async function checkHealth(): Promise<HealthResponse> {
+    return apiFetch<HealthResponse>('/health');
+}

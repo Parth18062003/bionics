@@ -24,12 +24,15 @@ from aadap.orchestrator.state_machine import TaskState
 # ── Helpers ─────────────────────────────────────────────────────────────
 
 
-class _FakeRedis:
-    """In-memory Redis mock for checkpoint tests."""
+
+class _FakeMemoryStore:
+    """In-memory Store mock for checkpoint tests."""
 
     def __init__(self):
         self._store: dict[str, bytes] = {}
-
+        # Add set method alias for set_with_ttl compatibility if needed by some internal logic, 
+        # but CheckpointManager uses set_with_ttl.
+        
     async def set_with_ttl(self, ns, key, value, ttl=None):
         full_key = f"{ns}:{key}"
         self._store[full_key] = value.encode() if isinstance(value, str) else value
@@ -63,8 +66,8 @@ class TestCheckpointSaveLoad:
     """Basic save/load cycle."""
 
     @pytest.fixture
-    def redis(self):
-        return _FakeRedis()
+    def store(self):
+        return _FakeMemoryStore()
 
     @pytest.fixture
     def event_store(self):
@@ -73,8 +76,8 @@ class TestCheckpointSaveLoad:
         return store
 
     @pytest.fixture
-    def manager(self, redis, event_store):
-        return CheckpointManager(redis=redis, event_store=event_store)
+    def manager(self, store, event_store):
+        return CheckpointManager(client=store, event_store=event_store)
 
     async def test_save_and_load(self, manager):
         """Saved checkpoint is recoverable via load."""
@@ -95,22 +98,22 @@ class TestCheckpointSaveLoad:
         assert loaded.metadata == {"key": "value"}
         assert loaded.task_id == str(task_id)
 
-    async def test_load_missing_returns_none(self, redis, event_store):
+    async def test_load_missing_returns_none(self, store, event_store):
         """Loading a nonexistent checkpoint (with no history) returns None."""
         event_store.get_history = AsyncMock(return_value=[])
-        manager = CheckpointManager(redis=redis, event_store=event_store)
+        manager = CheckpointManager(client=store, event_store=event_store)
 
         result = await manager.load_checkpoint(uuid.uuid4())
         assert result is None
 
 
 class TestCheckpointCrashRecovery:
-    """Simulate crash (Redis emptied) and verify DB fallback."""
+    """Simulate crash (Store emptied) and verify DB fallback."""
 
     async def test_replay_after_crash(self):
-        """After Redis is cleared, checkpoint is rebuilt from DB events."""
+        """After Store is cleared, checkpoint is rebuilt from DB events."""
         task_id = uuid.uuid4()
-        redis = _FakeRedis()
+        store = _FakeMemoryStore()
 
         # Simulate event history in DB
         history = [
@@ -121,13 +124,13 @@ class TestCheckpointCrashRecovery:
         event_store = MagicMock(spec=EventStore)
         event_store.get_history = AsyncMock(return_value=history)
 
-        manager = CheckpointManager(redis=redis, event_store=event_store)
+        manager = CheckpointManager(client=store, event_store=event_store)
 
         # Save checkpoint
         await manager.save_checkpoint(task_id, TaskState.PLANNING, 3)
 
-        # Simulate crash: clear Redis
-        redis._store.clear()
+        # Simulate crash: clear Store
+        store._store.clear()
 
         # Load should fall back to DB replay
         loaded = await manager.load_checkpoint(task_id)
@@ -137,9 +140,9 @@ class TestCheckpointCrashRecovery:
         assert loaded.sequence_num == 3
 
     async def test_redis_re_warmed_after_fallback(self):
-        """After DB fallback, the checkpoint is written back to Redis."""
+        """After DB fallback, the checkpoint is written back to Store."""
         task_id = uuid.uuid4()
-        redis = _FakeRedis()
+        store = _FakeMemoryStore()
 
         history = [
             _make_transition_row(task_id, "SUBMITTED", "PARSING", 1),
@@ -147,13 +150,13 @@ class TestCheckpointCrashRecovery:
         event_store = MagicMock(spec=EventStore)
         event_store.get_history = AsyncMock(return_value=history)
 
-        manager = CheckpointManager(redis=redis, event_store=event_store)
+        manager = CheckpointManager(client=store, event_store=event_store)
 
-        # Redis is empty — fallback will trigger
+        # Store is empty — fallback will trigger
         loaded = await manager.load_checkpoint(task_id)
         assert loaded is not None
 
-        # Second load should hit Redis (no more DB call)
+        # Second load should hit Store (no more DB call)
         event_store.get_history.reset_mock()
         loaded2 = await manager.load_checkpoint(task_id)
         assert loaded2 is not None
@@ -164,14 +167,14 @@ class TestCheckpointCrashRecovery:
 class TestCheckpointDelete:
     """Verify deletion."""
 
-    async def test_delete_removes_from_redis(self):
+    async def test_delete_removes_from_store(self):
         """After delete, load returns None (falls back to empty DB)."""
         task_id = uuid.uuid4()
-        redis = _FakeRedis()
+        store = _FakeMemoryStore()
         event_store = MagicMock(spec=EventStore)
         event_store.get_history = AsyncMock(return_value=[])
 
-        manager = CheckpointManager(redis=redis, event_store=event_store)
+        manager = CheckpointManager(client=store, event_store=event_store)
 
         await manager.save_checkpoint(task_id, TaskState.SUBMITTED, 0)
         await manager.delete_checkpoint(task_id)

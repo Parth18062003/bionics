@@ -1,7 +1,7 @@
 # AADAP — AI-Optimized Master Blueprint
 ### Autonomous AI Developer Agents Platform
 > **Version**: 1.1 · **Generated from**: PRD, SAD, TDD, Agent Design Spec, Memory Architecture Design, AI Agent Testing Strategy
-> **Revision Notes**: v1.1 — Frontend updated to Tanstack Start; Phases 8 (Testing) and 9 (CI/CD) deferred from initial implementation scope.
+> **Revision Notes**: v1.1 — Frontend updated to Next.js; Phases 8 (Testing) and 9 (CI/CD) deferred from initial implementation scope.
 
 ---
 
@@ -95,7 +95,7 @@ Agents MUST NOT override it.
 ```mermaid
 graph TB
     subgraph L6["Layer 6 — Presentation"]
-        WEB["Tanstack Start Web Application"]
+        WEB["Next.js Web Application"]
         EMAIL["Email Notifications"]
         API["REST API (FastAPI)"]
     end
@@ -145,7 +145,7 @@ graph TB
 
 | Layer | Components | Responsibility |
 |---|---|---|
-| **L6 — Presentation** | Tanstack Start App, Email Service, REST API | User interaction, task submission, monitoring, approval UX |
+| **L6 — Presentation** | Next.js App, Email Service, REST API | User interaction, task submission, monitoring, approval UX |
 | **L5 — Orchestration** | LangGraph Orchestrator, Scheduler, Approval Controller, Event Dispatcher | Task lifecycle management, 25-state machine, agent coordination, approval checkpoints |
 | **L4 — Agent** | Python Agent, Validation Agent, Optimization Agent, Pool Manager | Specialized task execution, code generation, validation, optimization |
 | **L3 — Integration** | AI Foundry Client, Databricks Client, Tool Registry | External service connectivity, API management, tool abstraction |
@@ -166,7 +166,7 @@ graph TB
 | **Monitoring** | Azure Monitor + App Insights | Telemetry, alerting, distributed tracing | Native Azure integration, custom metrics |
 | **Language** | Python 3.11+ | All backend services | LangGraph/LangChain ecosystem, Databricks SDK |
 | **API Framework** | FastAPI | REST API layer | Async support, auto-generated OpenAPI docs |
-| **Frontend** | Tanstack Start (React) | Web UI | Server components, real-time updates, TypeScript |
+| **Frontend** | Next.js (App router) | Web UI | Server components, real-time updates, TypeScript |
 | **Frontend Styling** | Tailwind CSS | UI design system | Utility-first CSS, dark mode support |
 
 ## 2.3 Safety Architecture — Multi-Layer Defense Model
@@ -848,7 +848,7 @@ graph TD
     P2 --> P5["Phase 5: Safety & Approval"]
     P4 --> P6["Phase 6: Memory Integration"]
     P5 --> P6
-    P6 --> P7["Phase 7: End-to-End Integration + Tanstack Start Frontend"]
+    P6 --> P7["Phase 7: End-to-End Integration + Next.js Frontend"]
     P7 -.-> P8["Phase 8: Testing & Hardening (DEFERRED)"]
     P8 -.-> P9["Phase 9: Production Readiness (DEFERRED)"]
 
@@ -965,13 +965,13 @@ graph TD
 
 ---
 
-### Phase 7 — End-to-End Integration + Tanstack Start Frontend
-**Goal:** Wire all components into a complete working pipeline with a production-quality Tanstack Start frontend.
+### Phase 7 — End-to-End Integration + Next.js Frontend
+**Goal:** Wire all components into a complete working pipeline with a production-quality Next.js frontend.
 **Dependencies:** Phase 6
 
 | Task | Files/Components | Validation |
 |---|---|---|
-| Tanstack Start project scaffold (Router, TypeScript, Tailwind CSS, ShadCn) | `frontend/` | `npm run dev` starts without errors |
+| Next.js project scaffold (App Router, TypeScript, Tailwind CSS, ShadCN) | `frontend/` | `npm run dev` starts without errors |
 | Dashboard page: task list, status indicators, real-time updates | `frontend/app/dashboard/` | Tasks visible with live status |
 | Requirement submission form (natural language input) | `frontend/app/submit/` | Submission creates task via API |
 | Task detail page: state history, artifacts, execution logs | `frontend/app/tasks/[id]/` | Full task lifecycle viewable |
@@ -982,7 +982,7 @@ graph TD
 | Full pipeline: submit → parse → plan → generate → validate → optimize → approve → deploy | Integration test | Task completes end-to-end without manual intervention |
 | Distributed tracing (correlation IDs across all services) | `core/tracing.py` | Single correlation ID visible across all service logs |
 
-**Exit Criteria:** A natural language requirement submitted via the Tanstack Start React UI results in a deployed, validated notebook on a sandbox Databricks cluster. Frontend shows real-time task progress.
+**Exit Criteria:** A natural language requirement submitted via the Next.js UI results in a deployed, validated notebook on a sandbox Databricks cluster. Frontend shows real-time task progress.
 
 ---
 
@@ -1183,57 +1183,40 @@ aadap/
 │       ├── event.py
 │       ├── artifact.py
 │       └── approval.py
-frontend/                         # TanStack Start React Application
-├── package.json
-├── vite.config.ts                # Replaces next.config.js
-├── tsconfig.json
-├── tailwind.config.ts
-├── postcss.config.js
-├── index.html
-│
-├── public/                       # Static assets
-│
-├── src/
-│   ├── main.tsx                  # App bootstrap (ReactDOM + Router)
-│   ├── router.tsx                # Router registration
-│   ├── routeTree.gen.ts          # Generated by TanStack Router
-│
-│   ├── routes/                   # File-based routing
-│   │   ├── __root.tsx            # Root layout (dark mode, fonts, nav)
-│   │   ├── index.tsx             # Landing / redirect
-│   │   ├── dashboard.tsx         # Task list, status overview, metrics
-│   │   ├── submit.tsx            # Requirement submission form
-│   │   ├── approvals.tsx         # Pending approvals UI
-│   │   └── tasks.$id.tsx         # Task detail (dynamic route)
-│
+├── frontend/                     # Next.js 14+ Web Application
+│   ├── package.json
+│   ├── next.config.js
+│   ├── tailwind.config.ts
+│   ├── tsconfig.json
+│   ├── app/                      # App Router
+│   │   ├── layout.tsx            # Root layout (dark mode, fonts, nav)
+│   │   ├── page.tsx              # Landing / redirect to dashboard
+│   │   ├── dashboard/
+│   │   │   └── page.tsx          # Task list, status overview, metrics
+│   │   ├── submit/
+│   │   │   └── page.tsx          # Requirement submission form
+│   │   ├── tasks/
+│   │   │   └── [id]/
+│   │   │       └── page.tsx      # Task detail: state history, artifacts, logs
+│   │   └── approvals/
+│   │       └── page.tsx          # Pending approvals, approve/reject UI
 │   ├── components/               # Reusable UI components
-│   │   ├── ui/                   # Base UI primitives
-│   │   │   ├── button.tsx
-│   │   │   ├── card.tsx
-│   │   │   └── modal.tsx
+│   │   ├── ui/                   # Base components (buttons, cards, modals)
 │   │   ├── task-card.tsx
-│   │   ├── state-timeline.tsx
-│   │   ├── code-viewer.tsx
-│   │   └── approval-action.tsx
-│
+│   │   ├── state-timeline.tsx    # Visual state machine progress
+│   │   ├── code-viewer.tsx       # Syntax-highlighted artifact viewer
+│   │   └── approval-action.tsx   # Approve/reject action panel
 │   ├── lib/
 │   │   ├── api/                  # Typed API client (fetch wrappers)
-│   │   │   ├── client.ts         # Base client (auth, interceptors)
 │   │   │   ├── tasks.ts
-│   │   │   └── approvals.ts
+│   │   │   ├── approvals.ts
+│   │   │   └── client.ts         # Base client with auth, error handling
 │   │   ├── types/                # Shared domain types
 │   │   │   ├── task.ts
 │   │   │   ├── approval.ts
 │   │   │   └── agent.ts
 │   │   └── utils.ts
-│
-│   ├── hooks/                    # Custom hooks (optional but recommended)
-│   │   ├── useTasks.ts
-│   │   ├── useApprovals.ts
-│   │   └── useTask.ts
-│
-│   └── styles/
-│       └── index.css
+│   └── public/                   # Static assets
 ├── docs/
 │   └── README.md                 # Project documentation
 ├── requirements.txt              # Python backend dependencies

@@ -49,23 +49,34 @@ class Settings(BaseSettings):
 
     # ── PostgreSQL (L2: Operational Store) ───────────────────────────────
     database_url: SecretStr = SecretStr(
-        "postgresql+asyncpg://aadap:aadap@localhost:5432/aadap"
+        "postgresql+asyncpg://parth:parth1806@localhost:5432/bionic"
     )
     db_pool_size: int = Field(default=10, ge=1, le=100)
     db_pool_overflow: int = Field(default=5, ge=0, le=50)
     db_echo_sql: bool = False
 
-    # ── Redis (L2: Working Memory, Tier 1) ──────────────────────────────
-    redis_url: str = "redis://localhost:6379/0"
-    redis_default_ttl_seconds: int = Field(
+    # ── In-Memory Store (L2: Working Memory, Tier 1) ─────────────────────
+    memory_default_ttl_seconds: int = Field(
         default=3600,
         ge=60,
         description="Default TTL for working memory keys (seconds).",
     )
-    redis_max_connections: int = Field(default=20, ge=1, le=200)
+
+    # Legacy Redis configuration (DEPRECATED: retained for backward compatibility)
+    redis_url: str = Field(default="redis://localhost:6379/0", description="DEPRECATED: unused")
+    redis_default_ttl_seconds: int | None = Field(default=None, description="DEPRECATED: use memory_default_ttl_seconds")
+    redis_max_connections: int = Field(default=20, ge=1, le=200, description="DEPRECATED: unused")
+
+    def model_post_init(self, __context: Any) -> None:
+        """Fallback: if memory_default_ttl_seconds is default but redis_ is set, use redis_."""
+        super().model_post_init(__context)
+        if self.redis_default_ttl_seconds is not None:
+            # If user set AADAP_REDIS_DEFAULT_TTL_SECONDS, respect it
+            self.memory_default_ttl_seconds = self.redis_default_ttl_seconds
 
     # ── Logging & Observability ──────────────────────────────────────────
-    log_level: str = Field(default="INFO", pattern=r"^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$")
+    log_level: str = Field(
+        default="INFO", pattern=r"^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$")
     log_format: str = "json"  # "json" or "console"
 
     # ── Correlation ──────────────────────────────────────────────────────

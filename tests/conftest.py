@@ -3,8 +3,7 @@ AADAP — Test Fixtures
 ======================
 Shared pytest fixtures for Phase 1 tests.
 
-Uses testcontainers for PostgreSQL and Redis when available,
-falls back to mocks for fast unit testing.
+Uses in-memory backend for fast unit testing.
 """
 
 from __future__ import annotations
@@ -49,57 +48,57 @@ def mock_db_engine():
     return engine
 
 
-# ── Mock Redis ───────────────────────────────────────────────────────────
+# ── In-Memory Store Client ──────────────────────────────────────────────
 @pytest.fixture
-def mock_redis_client():
-    """Provide a mock RedisClient for tests that don't need real Redis."""
-    from aadap.core.redis import RedisClient
-    inner = AsyncMock()
-    inner.ping = AsyncMock(return_value=True)
-    inner.set = AsyncMock()
-    inner.get = AsyncMock(return_value=None)
-    inner.delete = AsyncMock(return_value=1)
-    inner.ttl = AsyncMock(return_value=3600)
-    inner.exists = AsyncMock(return_value=False)
-    inner.aclose = AsyncMock()
-    return RedisClient(inner)
+def mock_memory_store_client():
+    """Provide a MemoryStoreClient backed by InMemoryBackend for tests."""
+    from aadap.core.memory_store import InMemoryBackend, MemoryStoreClient
+    backend = InMemoryBackend()
+    return MemoryStoreClient(backend)
 
 
 # ── HTTP client (with mocked infra) ─────────────────────────────────────
 @pytest.fixture
-async def client(mock_db_engine, mock_redis_client):
+async def test_app(mock_db_engine, mock_memory_store_client):
     """
-    AsyncClient wired to the FastAPI app with mocked DB/Redis.
+    FastAPI app instance with mocked DB and in-memory store.
 
-    Patches init_db/init_redis/close_db/close_redis so the lifespan
-    doesn't attempt real connections.
+    Exposes the app so tests can do ``app.dependency_overrides``.
     """
     import aadap.db.session as sess_mod
-    import aadap.core.redis as redis_mod
+    import aadap.core.memory_store as mem_mod
 
     # Patch session module state
     sess_mod._engine = mock_db_engine
     sess_mod._session_factory = MagicMock()
 
-    # Patch redis module state
-    redis_mod._redis_client = mock_redis_client
+    # Patch memory module state
+    mem_mod._memory_store_client = mock_memory_store_client
 
     with (
         patch.object(sess_mod, "init_db", new_callable=AsyncMock, return_value=mock_db_engine),
         patch.object(sess_mod, "close_db", new_callable=AsyncMock),
-        patch.object(redis_mod, "init_redis", new_callable=AsyncMock, return_value=mock_redis_client),
-        patch.object(redis_mod, "close_redis", new_callable=AsyncMock),
+        patch.object(mem_mod, "init_memory_store", new_callable=AsyncMock, return_value=mock_memory_store_client),
+        patch.object(mem_mod, "close_memory_store", new_callable=AsyncMock),
     ):
         from aadap.main import create_app
         app = create_app()
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            yield ac
+        yield app
 
     # Cleanup module state
     sess_mod._engine = None
     sess_mod._session_factory = None
-    redis_mod._redis_client = None
+    mem_mod._memory_store_client = None
+
+
+@pytest.fixture
+async def client(test_app):
+    """
+    AsyncClient wired to the FastAPI app with mocked DB and in-memory store.
+    """
+    transport = ASGITransport(app=test_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────

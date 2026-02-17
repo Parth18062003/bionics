@@ -2,7 +2,7 @@
 
 ## Layered Architecture (6 Layers)
 
-L6 Presentation — Tanstack Start UI, REST API, Email  
+L6 Presentation — Next.js UI, REST API, Email  
 L5 Orchestration — LangGraph Orchestrator, Scheduler, Approval Controller  
 L4 Agent Layer — Developer, Validation, Optimization agents  
 L3 Integration — Azure AI Foundry, Databricks API, Tool Registry  

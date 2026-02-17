@@ -1,13 +1,13 @@
 """
 AADAP — Checkpoint Persistence
 ================================
-Save and restore task state checkpoints using Redis (fast) with
-DB event replay as fallback (crash recovery).
+Save and restore task state checkpoints using in-memory store (fast)
+with DB event replay as fallback (crash recovery).
 
-Architecture layer: L5 (Orchestration) + L2 (Memory: Redis CHECKPOINTS).
+Architecture layer: L5 (Orchestration) + L2 (Memory: CHECKPOINTS).
 
 Usage:
-    mgr = CheckpointManager(redis_client, event_store)
+    mgr = CheckpointManager(memory_client, event_store)
     await mgr.save_checkpoint(task_id, state, seq_num, metadata)
     cp = await mgr.load_checkpoint(task_id)
 """
@@ -19,7 +19,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
-from aadap.core.redis import RedisClient, RedisNamespace
+from aadap.core.memory_store import MemoryStoreClient, MemoryNamespace
 from aadap.orchestrator.events import EventStore
 from aadap.orchestrator.state_machine import TaskState
 
@@ -47,10 +47,10 @@ class CheckpointManager:
     """
     Two-tier checkpoint persistence.
 
-    - **Primary**: Redis CHECKPOINTS namespace (low-latency).
+    - **Primary**: In-memory CHECKPOINTS namespace (low-latency).
     - **Fallback**: DB event replay via ``EventStore`` (crash recovery).
 
-    After a simulated crash (Redis cleared), ``load_checkpoint``
+    After a simulated crash (store cleared), ``load_checkpoint``
     transparently replays from DB to rebuild consistent state.
     """
 
@@ -58,13 +58,13 @@ class CheckpointManager:
 
     def __init__(
         self,
-        redis: RedisClient,
+        client: MemoryStoreClient,
         event_store: EventStore,
     ) -> None:
-        self._redis = redis
+        self._client = client
         self._event_store = event_store
 
-    def _redis_key(self, task_id: uuid.UUID) -> str:
+    def _memory_key(self, task_id: uuid.UUID) -> str:
         return f"{self._KEY_PREFIX}:{task_id}"
 
     async def save_checkpoint(
@@ -75,7 +75,7 @@ class CheckpointManager:
         metadata: dict | None = None,
     ) -> Checkpoint:
         """
-        Persist a checkpoint to Redis CHECKPOINTS namespace.
+        Persist a checkpoint to the CHECKPOINTS namespace.
 
         Returns the saved ``Checkpoint``.
         """
@@ -86,9 +86,9 @@ class CheckpointManager:
             metadata=metadata or {},
             created_at=datetime.now(timezone.utc).isoformat(),
         )
-        await self._redis.set_with_ttl(
-            RedisNamespace.CHECKPOINTS,
-            self._redis_key(task_id),
+        await self._client.set_with_ttl(
+            MemoryNamespace.CHECKPOINTS,
+            self._memory_key(task_id),
             cp.to_json(),
         )
         return cp
@@ -97,14 +97,14 @@ class CheckpointManager:
         self, task_id: uuid.UUID
     ) -> Checkpoint | None:
         """
-        Load checkpoint from Redis.  Falls back to DB replay on miss.
+        Load checkpoint from cache.  Falls back to DB replay on miss.
 
-        This ensures crash recovery: if Redis was flushed, the event
-        store is replayed to rebuild the checkpoint.
+        This ensures crash recovery: if the in-memory store was cleared,
+        the event store is replayed to rebuild the checkpoint.
         """
-        raw = await self._redis.get(
-            RedisNamespace.CHECKPOINTS,
-            self._redis_key(task_id),
+        raw = await self._client.get(
+            MemoryNamespace.CHECKPOINTS,
+            self._memory_key(task_id),
         )
         if raw is not None:
             return Checkpoint.from_json(raw)
@@ -113,10 +113,10 @@ class CheckpointManager:
         return await self._replay_from_db(task_id)
 
     async def delete_checkpoint(self, task_id: uuid.UUID) -> None:
-        """Remove checkpoint from Redis."""
-        await self._redis.delete(
-            RedisNamespace.CHECKPOINTS,
-            self._redis_key(task_id),
+        """Remove checkpoint from the store."""
+        await self._client.delete(
+            MemoryNamespace.CHECKPOINTS,
+            self._memory_key(task_id),
         )
 
     async def _replay_from_db(
@@ -142,10 +142,10 @@ class CheckpointManager:
             else str(last.created_at),
         )
 
-        # Re-warm Redis cache
-        await self._redis.set_with_ttl(
-            RedisNamespace.CHECKPOINTS,
-            self._redis_key(task_id),
+        # Re-warm in-memory cache
+        await self._client.set_with_ttl(
+            MemoryNamespace.CHECKPOINTS,
+            self._memory_key(task_id),
             cp.to_json(),
         )
         return cp

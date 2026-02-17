@@ -1,16 +1,16 @@
 """
 AADAP — Working Memory
 ========================
-Redis-backed Tier 1 working memory for agent session context.
+In-memory Tier 1 working memory for agent session context.
 
 All entries are TTL-bound — no entry may exist without a TTL.
-Uses ``RedisNamespace.WORKING_MEMORY`` from Phase 1 infrastructure.
+Uses ``MemoryNamespace.WORKING_MEMORY`` from Phase 1 infrastructure.
 
 Usage:
     from aadap.memory.working_memory import WorkingMemory
-    from aadap.core.redis import get_redis
+    from aadap.core.memory_store import get_memory_store
 
-    wm = WorkingMemory(await get_redis())
+    wm = WorkingMemory(await get_memory_store())
     await wm.store("agent-1", "context", {"key": "value"})
     data = await wm.recall("agent-1", "context")
 """
@@ -19,21 +19,21 @@ from __future__ import annotations
 
 import json
 
-from aadap.core.redis import RedisClient, RedisNamespace
+from aadap.core.memory_store import MemoryStoreClient, MemoryNamespace
 
 
 class WorkingMemory:
     """
-    Agent-scoped key-value working memory backed by Redis.
+    Agent-scoped key-value working memory backed by in-memory store.
 
     Invariant: every entry is TTL-bound.  The TTL comes from either
     the caller or the namespace default configured in ``_NAMESPACE_TTLS``.
     No entry may persist indefinitely.
     """
 
-    def __init__(self, redis: RedisClient) -> None:
-        self._redis = redis
-        self._ns = RedisNamespace.WORKING_MEMORY
+    def __init__(self, client: MemoryStoreClient) -> None:
+        self._client = client
+        self._ns = MemoryNamespace.WORKING_MEMORY
 
     # ── Key scheme ──────────────────────────────────────────────────────
 
@@ -71,7 +71,7 @@ class WorkingMemory:
 
         serialised = json.dumps(value, default=str)
         full_key = self._key(agent_id, key)
-        await self._redis.set_with_ttl(self._ns, full_key, serialised, ttl=ttl)
+        await self._client.set_with_ttl(self._ns, full_key, serialised, ttl=ttl)
 
     # ── Recall ──────────────────────────────────────────────────────────
 
@@ -82,7 +82,7 @@ class WorkingMemory:
         Returns ``None`` if the key has expired or does not exist.
         """
         full_key = self._key(agent_id, key)
-        raw = await self._redis.get(self._ns, full_key)
+        raw = await self._client.get(self._ns, full_key)
         if raw is None:
             return None
         return json.loads(raw)
@@ -92,7 +92,7 @@ class WorkingMemory:
     async def forget(self, agent_id: str, key: str) -> None:
         """Delete a key from working memory."""
         full_key = self._key(agent_id, key)
-        await self._redis.delete(self._ns, full_key)
+        await self._client.delete(self._ns, full_key)
 
     # ── List keys ───────────────────────────────────────────────────────
 
@@ -100,7 +100,7 @@ class WorkingMemory:
         """
         List all keys stored for an agent.
 
-        Uses Redis SCAN under the hood, returning just the suffix
+        Uses in-memory scan under the hood, returning just the suffix
         portion of each key (stripping namespace + agent prefix).
         """
         pattern = f"aadap:{self._ns.value}:{agent_id}:*"
@@ -108,7 +108,7 @@ class WorkingMemory:
         keys: list[str] = []
         cursor = 0
         while True:
-            cursor, batch = await self._redis.raw.scan(
+            cursor, batch = await self._client.raw.scan(
                 cursor=cursor, match=pattern, count=100
             )
             for k in batch:

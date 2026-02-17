@@ -18,11 +18,13 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 
 from aadap.api.health import router as health_router
+from aadap.api.routes import approvals_router, artifacts_router, tasks_router
 from aadap.core.config import get_settings
 from aadap.core.logging import configure_logging, get_logger
 from aadap.core.middleware import CorrelationMiddleware
-from aadap.core.redis import close_redis, init_redis
+from aadap.core.memory_store import close_memory_store, init_memory_store
 from aadap.db.session import close_db, init_db
+from fastapi.middleware.cors import CORSMiddleware
 
 
 @asynccontextmanager
@@ -30,8 +32,8 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     """
     Application lifecycle.
 
-    Startup: configure logging, connect DB & Redis.
-    Shutdown: close DB & Redis connections.
+    Startup: configure logging, connect DB & in-memory store.
+    Shutdown: close DB & in-memory store.
     """
     logger = get_logger("aadap.main")
 
@@ -42,15 +44,15 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     await init_db()
     logger.info("db.connected")
 
-    await init_redis()
-    logger.info("redis.connected")
+    await init_memory_store()
+    logger.info("memory.initialized")
 
     logger.info("app.started")
     yield
 
     # ── Shutdown ─────────────────────────────────────────────────────
     logger.info("app.stopping")
-    await close_redis()
+    await close_memory_store()
     await close_db()
     logger.info("app.stopped")
 
@@ -69,9 +71,19 @@ def create_app() -> FastAPI:
 
     # ── Middleware (pluggable chain — Risk R4) ────────────────────────
     application.add_middleware(CorrelationMiddleware)
-
+    origins = ["http://localhost:3000", "http://172.28.96.1:3000"]
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,  # Adjust in production,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     # ── Routers ──────────────────────────────────────────────────────
     application.include_router(health_router)
+    application.include_router(tasks_router)
+    application.include_router(approvals_router)
+    application.include_router(artifacts_router)
 
     return application
 

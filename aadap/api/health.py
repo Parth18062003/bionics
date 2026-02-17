@@ -1,7 +1,7 @@
 """
 AADAP — Health Endpoint
 ========================
-Provides system health checks for DB and Redis connectivity.
+Provides system health checks for DB and in-memory store connectivity.
 
 Phase 1 DoD: "Health endpoint responds."
 """
@@ -12,7 +12,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from aadap.core.redis import get_redis
+from aadap.core.memory_store import get_memory_store
 from aadap.db.session import get_engine
 
 router = APIRouter(tags=["health"])
@@ -22,14 +22,14 @@ class HealthResponse(BaseModel):
     """Health check response schema."""
     status: str
     postgres: str
-    redis: str
+    redis: str  # Preserved for API backward compatibility (checks memory store)
 
 
 @router.get(
     "/health",
     response_model=HealthResponse,
     summary="System health check",
-    description="Returns connectivity status for PostgreSQL and Redis.",
+    description="Returns connectivity status for PostgreSQL and in-memory store.",
 )
 async def health_check() -> HealthResponse:
     """
@@ -40,14 +40,14 @@ async def health_check() -> HealthResponse:
     Overall status is 'healthy' only if all components are ok.
     """
     pg_status = await _check_postgres()
-    redis_status = await _check_redis()
+    memory_status = await _check_memory_store()
 
-    overall = "healthy" if pg_status == "ok" and redis_status == "ok" else "degraded"
+    overall = "healthy" if pg_status == "ok" and memory_status == "ok" else "degraded"
 
     return HealthResponse(
         status=overall,
         postgres=pg_status,
-        redis=redis_status,
+        redis=memory_status,
     )
 
 
@@ -61,10 +61,10 @@ async def _check_postgres() -> str:
         return "error"
 
 
-async def _check_redis() -> str:
+async def _check_memory_store() -> str:
     try:
-        redis = await get_redis()
-        if await redis.ping():
+        store = await get_memory_store()
+        if await store.ping():
             return "ok"
         return "error"
     except Exception:

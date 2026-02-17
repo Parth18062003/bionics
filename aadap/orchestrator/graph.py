@@ -246,8 +246,8 @@ async def schedule(task_id: uuid.UUID, priority: int = 0) -> None:
 
     Interface: ``schedule(task_id, priority)`` (PHASE_2_CONTRACTS.md).
     """
-    # Note: TaskScheduler is in-memory.  In production this would be
-    # backed by Redis sorted sets.  For Phase 2 we use a module-level
+    # Note: TaskScheduler is in-memory.  In production this could be
+    # backed by a persistent store.  For Phase 2 we use a module-level
     # instance.
     _scheduler.schedule(task_id, priority)
     logger.info(

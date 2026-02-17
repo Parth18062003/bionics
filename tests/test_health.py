@@ -24,12 +24,12 @@ async def test_health_response_structure(client):
 
     assert "status" in data
     assert "postgres" in data
-    assert "redis" in data
+    assert "redis" in data  # Field name preserved (public API)
 
 
 @pytest.mark.asyncio
 async def test_health_all_ok(client):
-    """When DB and Redis are reachable, overall status is 'healthy'."""
+    """When DB and store are reachable, overall status is 'healthy'."""
     resp = await client.get("/health")
     data = resp.json()
 
@@ -39,9 +39,13 @@ async def test_health_all_ok(client):
 
 
 @pytest.mark.asyncio
-async def test_health_degraded_on_redis_failure(client, mock_redis_client):
-    """When Redis is unreachable, status degrades."""
-    mock_redis_client._client.ping.side_effect = ConnectionError("Redis down")
+async def test_health_degraded_on_store_failure(client, mock_memory_store_client):
+    """When store is unreachable, status degrades."""
+    # Monkey-patch ping to raise
+    async def _broken_ping():
+        raise ConnectionError("Store down")
+
+    mock_memory_store_client._client.ping = _broken_ping
 
     resp = await client.get("/health")
     data = resp.json()
