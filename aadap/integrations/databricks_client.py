@@ -349,7 +349,14 @@ class DatabricksClient(BaseDatabricksClient):
 
     def _map_command_state(self, state: str) -> JobStatus:
         """Map Databricks command state to JobStatus enum."""
-        return self._COMMAND_STATE_MAP.get(state, JobStatus.PENDING)
+        return self._COMMAND_STATE_MAP.get(state.title(), JobStatus.PENDING)
+
+    @staticmethod
+    def _as_text(value: Any) -> str | None:
+        """Normalize SDK enum/string values into plain text."""
+        if value is None:
+            return None
+        return str(getattr(value, "value", value))
 
     async def submit_job(
         self,
@@ -535,7 +542,9 @@ class DatabricksClient(BaseDatabricksClient):
         if statement.status:
             state = statement.status.state
             if state:
-                return self._map_statement_state(state.value)
+                state_text = self._as_text(state)
+                if state_text:
+                    return self._map_statement_state(state_text)
 
         return JobStatus.PENDING
 
@@ -558,7 +567,9 @@ class DatabricksClient(BaseDatabricksClient):
             )
 
             if command.status:
-                return self._map_command_state(command.status.value)
+                status_text = self._as_text(command.status)
+                if status_text:
+                    return self._map_command_state(status_text)
 
             return JobStatus.PENDING
         except Exception as e:
@@ -615,7 +626,8 @@ class DatabricksClient(BaseDatabricksClient):
                 if hasattr(result_data, 'data_array') and result_data.data_array:
                     output = self._format_result_data(
                         result_data.data_array,
-                        result_data.row_count if hasattr(result_data, 'row_count') else None,
+                        result_data.row_count if hasattr(
+                            result_data, 'row_count') else None,
                     )
                 elif hasattr(result_data, 'chunks') and result_data.chunks:
                     output = "[Results available via chunk links]"
@@ -671,11 +683,15 @@ class DatabricksClient(BaseDatabricksClient):
                 if hasattr(results, 'data') and results.data:
                     output = str(results.data)
                 elif hasattr(results, 'result_type'):
-                    if results.result_type and results.result_type.value == "text":
-                        output = str(results.data) if hasattr(results, 'data') else "Execution completed"
-                    elif results.result_type and results.result_type.value == "error":
-                        error = str(results.cause) if hasattr(results, 'cause') else "Python execution error"
-                        output = str(results.summary) if hasattr(results, 'summary') else None
+                    result_type = self._as_text(results.result_type)
+                    if result_type and result_type.lower() == "text":
+                        output = str(results.data) if hasattr(
+                            results, 'data') else "Execution completed"
+                    elif result_type and result_type.lower() == "error":
+                        error = str(results.cause) if hasattr(
+                            results, 'cause') else "Python execution error"
+                        output = str(results.summary) if hasattr(
+                            results, 'summary') else None
                 else:
                     output = "Python execution completed"
             elif status == JobStatus.FAILED:

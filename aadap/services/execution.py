@@ -365,22 +365,33 @@ class ExecutionService:
     async def _transition(
         self,
         task_id: uuid.UUID,
-        from_state: TaskState,
-        to_state: TaskState,
+        from_state: TaskState | str,
+        to_state: TaskState | str,
     ) -> None:
         """Record a state transition with full audit trail."""
+        from_state_enum = (
+            from_state
+            if isinstance(from_state, TaskState)
+            else TaskStateMachine.parse_state(from_state)
+        )
+        to_state_enum = (
+            to_state
+            if isinstance(to_state, TaskState)
+            else TaskStateMachine.parse_state(to_state)
+        )
+
         await self._event_store.record_transition(
             task_id=task_id,
-            from_state=from_state,
-            to_state=to_state,
+            from_state=from_state_enum,
+            to_state=to_state_enum,
             triggered_by="execution_service",
-            reason=f"Automated transition: {from_state.value} → {to_state.value}",
+            reason=f"Automated transition: {from_state_enum.value} → {to_state_enum.value}",
         )
         logger.info(
             "execution.transition",
             task_id=str(task_id),
-            from_state=from_state.value,
-            to_state=to_state.value,
+            from_state=from_state_enum.value,
+            to_state=to_state_enum.value,
         )
 
     async def _generate_code(self, task: Task, language: str) -> str:
