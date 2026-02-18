@@ -150,6 +150,7 @@ async def create_task(
     priority: int = 0,
     environment: str = "SANDBOX",
     created_by: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> uuid.UUID:
     """
     Create a new task in SUBMITTED state.
@@ -167,6 +168,7 @@ async def create_task(
             priority=priority,
             environment=environment,
             created_by=created_by,
+            metadata_=metadata or {},
         )
         session.add(task)
 

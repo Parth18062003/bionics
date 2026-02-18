@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { getTask, getTaskEvents, listArtifacts } from '@/api/client';
-import type { Task, TaskEvent, ArtifactSummary } from '@/api/types';
+import { getTask, getTaskEvents, listArtifacts, executeTask, getExecutions } from '@/api/client';
+import type { Task, TaskEvent, ArtifactSummary, ExecutionRecord } from '@/api/types';
 import { STATE_COLORS, STATE_LABELS } from '@/api/types';
 
 export default function TaskDetailPage() {
@@ -14,8 +14,11 @@ export default function TaskDetailPage() {
     const [task, setTask] = useState<Task | null>(null);
     const [events, setEvents] = useState<TaskEvent[]>([]);
     const [artifacts, setArtifacts] = useState<ArtifactSummary[]>([]);
+    const [executions, setExecutions] = useState<ExecutionRecord[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [executing, setExecuting] = useState(false);
+    const [execResult, setExecResult] = useState<string | null>(null);
 
     useEffect(() => {
         loadDetail();
@@ -25,10 +28,11 @@ export default function TaskDetailPage() {
 
     async function loadDetail() {
         try {
-            const [taskRes, eventsRes, artifactsRes] = await Promise.allSettled([
+            const [taskRes, eventsRes, artifactsRes, execRes] = await Promise.allSettled([
                 getTask(taskId),
                 getTaskEvents(taskId),
                 listArtifacts(taskId),
+                getExecutions(taskId),
             ]);
 
             if (taskRes.status === 'fulfilled') setTask(taskRes.value);
@@ -36,11 +40,26 @@ export default function TaskDetailPage() {
 
             if (eventsRes.status === 'fulfilled') setEvents(eventsRes.value);
             if (artifactsRes.status === 'fulfilled') setArtifacts(artifactsRes.value);
+            if (execRes.status === 'fulfilled') setExecutions(execRes.value);
             setError(null);
         } catch (err: any) {
             setError(err.message || 'Failed to load task');
         } finally {
             setLoading(false);
+        }
+    }
+
+    async function handleExecute() {
+        setExecuting(true);
+        setExecResult(null);
+        try {
+            const res = await executeTask(taskId);
+            setExecResult(res.status === 'completed' ? 'Execution completed successfully!' : `Status: ${res.status}`);
+            loadDetail(); // Refresh data
+        } catch (err: any) {
+            setExecResult(`Execution failed: ${err.detail || err.message}`);
+        } finally {
+            setExecuting(false);
         }
     }
 
@@ -59,6 +78,7 @@ export default function TaskDetailPage() {
 
     const stateColor = STATE_COLORS[task.current_state] || '#6b7280';
     const tokenPct = task.token_budget > 0 ? Math.round((task.tokens_used / task.token_budget) * 100) : 0;
+    const canExecute = ['SUBMITTED', 'PARSED', 'PLANNED', 'AGENT_ASSIGNED', 'APPROVED'].includes(task.current_state);
 
     return (
         <div className="page-container animate-in">
@@ -82,19 +102,48 @@ export default function TaskDetailPage() {
                         </span>
                     </div>
                 </div>
-                <span
-                    className="badge"
-                    style={{
-                        background: `${stateColor}20`,
-                        color: stateColor,
-                        fontSize: 'var(--font-size-sm)',
-                        padding: '6px 16px',
-                    }}
-                >
-                    <span className="badge-dot" style={{ background: stateColor, width: 8, height: 8 }} />
-                    {STATE_LABELS[task.current_state] || task.current_state}
-                </span>
+                <div className="flex items-center gap-md">
+                    {canExecute && (
+                        <button
+                            className="btn btn-primary"
+                            disabled={executing}
+                            onClick={handleExecute}
+                        >
+                            {executing ? (
+                                <><div className="loading-spinner" style={{ width: 16, height: 16 }} /> Executing...</>
+                            ) : (
+                                '▶ Execute'
+                            )}
+                        </button>
+                    )}
+                    <span
+                        className="badge"
+                        style={{
+                            background: `${stateColor}20`,
+                            color: stateColor,
+                            fontSize: 'var(--font-size-sm)',
+                            padding: '6px 16px',
+                        }}
+                    >
+                        <span className="badge-dot" style={{ background: stateColor, width: 8, height: 8 }} />
+                        {STATE_LABELS[task.current_state] || task.current_state}
+                    </span>
+                </div>
             </div>
+
+            {/* Execution result banner */}
+            {execResult && (
+                <div style={{
+                    marginBottom: 'var(--space-xl)',
+                    padding: 'var(--space-md) var(--space-lg)',
+                    borderRadius: 'var(--radius-md)',
+                    background: execResult.includes('failed') ? 'var(--color-danger-muted)' : 'var(--color-success-muted)',
+                    color: execResult.includes('failed') ? 'var(--color-danger)' : 'var(--color-success)',
+                    fontSize: 'var(--font-size-sm)',
+                }}>
+                    {execResult}
+                </div>
+            )}
 
             {/* Metadata Grid */}
             <div className="grid-stats" style={{ marginBottom: 'var(--space-2xl)' }}>
@@ -142,6 +191,82 @@ export default function TaskDetailPage() {
                 <div className="card" style={{ marginBottom: 'var(--space-2xl)' }}>
                     <h3 style={{ fontSize: 'var(--font-size-base)', fontWeight: 600, marginBottom: 'var(--space-md)' }}>Description</h3>
                     <p className="text-secondary" style={{ lineHeight: 1.7 }}>{task.description}</p>
+                </div>
+            )}
+
+            {/* Execution Records */}
+            {executions.length > 0 && (
+                <div className="card" style={{ marginBottom: 'var(--space-2xl)' }}>
+                    <h3 style={{ fontSize: 'var(--font-size-base)', fontWeight: 600, marginBottom: 'var(--space-xl)' }}>
+                        Execution Records ({executions.length})
+                    </h3>
+                    <div className="flex flex-col gap-md">
+                        {executions.map((exec) => (
+                            <div
+                                key={exec.id}
+                                style={{
+                                    padding: 'var(--space-lg)',
+                                    background: 'var(--color-bg-tertiary)',
+                                    borderRadius: 'var(--radius-md)',
+                                    borderLeft: `3px solid ${exec.status === 'completed' ? 'var(--color-success)' : exec.status === 'failed' ? 'var(--color-danger)' : 'var(--color-warning)'}`,
+                                }}
+                            >
+                                <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-md)' }}>
+                                    <div className="flex items-center gap-md">
+                                        <span className="badge" style={{
+                                            background: exec.status === 'completed' ? 'var(--color-success-muted)' : exec.status === 'failed' ? 'var(--color-danger-muted)' : 'var(--color-warning-muted)',
+                                            color: exec.status === 'completed' ? 'var(--color-success)' : exec.status === 'failed' ? 'var(--color-danger)' : 'var(--color-warning)',
+                                        }}>
+                                            {exec.status.toUpperCase()}
+                                        </span>
+                                        <span className="text-xs text-secondary">{exec.environment}</span>
+                                    </div>
+                                    <div className="text-xs text-secondary">
+                                        {exec.duration_ms != null && <span>{exec.duration_ms}ms · </span>}
+                                        {formatTime(exec.created_at)}
+                                    </div>
+                                </div>
+                                {exec.output && (
+                                    <div style={{ marginBottom: 'var(--space-sm)' }}>
+                                        <div className="text-xs text-secondary" style={{ marginBottom: 'var(--space-xs)', fontWeight: 500 }}>Output</div>
+                                        <pre style={{
+                                            padding: 'var(--space-md)',
+                                            background: 'var(--color-bg-primary)',
+                                            borderRadius: 'var(--radius-sm)',
+                                            fontFamily: 'var(--font-mono)',
+                                            fontSize: 'var(--font-size-xs)',
+                                            color: 'var(--color-success)',
+                                            whiteSpace: 'pre-wrap',
+                                            wordBreak: 'break-word',
+                                            maxHeight: 200,
+                                            overflow: 'auto',
+                                        }}>
+                                            {exec.output}
+                                        </pre>
+                                    </div>
+                                )}
+                                {exec.error && (
+                                    <div>
+                                        <div className="text-xs text-secondary" style={{ marginBottom: 'var(--space-xs)', fontWeight: 500 }}>Error</div>
+                                        <pre style={{
+                                            padding: 'var(--space-md)',
+                                            background: 'var(--color-bg-primary)',
+                                            borderRadius: 'var(--radius-sm)',
+                                            fontFamily: 'var(--font-mono)',
+                                            fontSize: 'var(--font-size-xs)',
+                                            color: 'var(--color-danger)',
+                                            whiteSpace: 'pre-wrap',
+                                            wordBreak: 'break-word',
+                                            maxHeight: 200,
+                                            overflow: 'auto',
+                                        }}>
+                                            {exec.error}
+                                        </pre>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
                 </div>
             )}
 

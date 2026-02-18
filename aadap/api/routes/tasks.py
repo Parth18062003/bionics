@@ -57,7 +57,20 @@ class TaskCreateRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=512)
     description: str | None = None
     priority: int = Field(default=0, ge=0, le=10)
-    environment: str = Field(default="SANDBOX", pattern=r"^(SANDBOX|PRODUCTION)$")
+    environment: str = Field(
+        default="SANDBOX", pattern=r"^(SANDBOX|PRODUCTION)$")
+    agent_type: str | None = Field(
+        default=None,
+        description="Agent marketplace ID (e.g. 'adb-sql', 'adb-python').",
+    )
+    language: str | None = Field(
+        default=None,
+        description="Target language: 'sql' or 'python'. Inferred from agent_type if omitted.",
+    )
+    auto_execute: bool = Field(
+        default=False,
+        description="If true, immediately triggers end-to-end execution after task creation.",
+    )
 
 
 class TaskResponse(BaseModel):
@@ -141,19 +154,41 @@ async def create_task_endpoint(
 
     Delegates to ``graph.create_task`` — the API never directly
     inserts into the database (invariant: API cannot bypass orchestrator).
+
+    If ``auto_execute`` is true, triggers the full execution pipeline
+    after task creation.
     """
+    # Build metadata from agent selection
+    metadata: dict = {}
+    if body.agent_type:
+        metadata["agent_type"] = body.agent_type
+    if body.language:
+        metadata["language"] = body.language
+    elif body.agent_type:
+        # Infer language from agent_type
+        _lang_map = {
+            "adb-sql": "sql",
+            "adb-python": "python",
+            "adb-optimization": "python",
+            "fabric-scala": "scala",
+            "fabric-python": "python",
+        }
+        metadata["language"] = _lang_map.get(body.agent_type, "sql")
+
     task_id = await create_task(
         title=body.title,
         description=body.description,
         priority=body.priority,
         environment=body.environment,
         created_by=current_user,
+        metadata=metadata if metadata else None,
     )
 
     logger.info(
         "api.task.created",
         task_id=str(task_id),
         correlation_id=correlation_id,
+        agent_type=body.agent_type,
     )
 
     # Fetch the created task to return full details
@@ -163,6 +198,26 @@ async def create_task_endpoint(
     task = result.scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=500, detail="Task creation failed.")
+
+    # Auto-execute if requested
+    if body.auto_execute:
+        from aadap.services.execution import ExecutionService
+
+        try:
+            service = ExecutionService.create()
+            # Fire execution (runs inline — for production, use background task)
+            import asyncio
+            asyncio.ensure_future(service.execute_task(task_id))
+            logger.info(
+                "api.task.auto_execute_started",
+                task_id=str(task_id),
+            )
+        except Exception as exc:
+            logger.warning(
+                "api.task.auto_execute_failed",
+                task_id=str(task_id),
+                error=str(exc),
+            )
 
     return _task_to_response(task)
 
@@ -199,7 +254,8 @@ async def list_tasks(
 
     # Page
     offset = (page - 1) * page_size
-    query = query.order_by(Task.created_at.desc()).offset(offset).limit(page_size)
+    query = query.order_by(Task.created_at.desc()).offset(
+        offset).limit(page_size)
     result = await session.execute(query)
     tasks = result.scalars().all()
 

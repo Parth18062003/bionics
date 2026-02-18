@@ -6,6 +6,7 @@ import './globals.css';
 
 const NAV_LINKS = [
   { href: '/', label: 'Dashboard' },
+  { href: '/marketplace', label: 'Marketplace' },
   { href: '/tasks', label: 'Tasks' },
   { href: '/tasks/new', label: 'New Task' },
   { href: '/approvals', label: 'Approvals' },

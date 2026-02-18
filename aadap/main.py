@@ -18,7 +18,13 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 
 from aadap.api.health import router as health_router
-from aadap.api.routes import approvals_router, artifacts_router, tasks_router
+from aadap.api.routes import (
+    approvals_router,
+    artifacts_router,
+    execution_router,
+    marketplace_router,
+    tasks_router,
+)
 from aadap.core.config import get_settings
 from aadap.core.logging import configure_logging, get_logger
 from aadap.core.middleware import CorrelationMiddleware
@@ -84,6 +90,8 @@ def create_app() -> FastAPI:
     application.include_router(tasks_router)
     application.include_router(approvals_router)
     application.include_router(artifacts_router)
+    application.include_router(marketplace_router)
+    application.include_router(execution_router)
 
     return application
 

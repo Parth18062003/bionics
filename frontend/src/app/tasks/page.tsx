@@ -37,9 +37,12 @@ export default function TasksPage() {
     const totalPages = Math.ceil(total / pageSize);
 
     const states = [
-        '', 'SUBMITTED', 'VALIDATING', 'PLANNING', 'READY', 'ASSIGNED',
-        'EXECUTING', 'AWAITING_REVIEW', 'APPROVED', 'COMPLETE', 'FAILED',
-        'CANCELLED', 'ESCALATED', 'PAUSED',
+        '', 'SUBMITTED', 'PARSING', 'PARSED', 'PARSE_FAILED', 'PLANNING', 'PLANNED',
+        'AGENT_ASSIGNMENT', 'AGENT_ASSIGNED', 'IN_DEVELOPMENT', 'CODE_GENERATED',
+        'DEV_FAILED', 'IN_VALIDATION', 'VALIDATION_PASSED', 'VALIDATION_FAILED',
+        'OPTIMIZATION_PENDING', 'IN_OPTIMIZATION', 'OPTIMIZED',
+        'APPROVAL_PENDING', 'IN_REVIEW', 'APPROVED', 'REJECTED',
+        'DEPLOYING', 'DEPLOYED', 'COMPLETED', 'CANCELLED',
     ];
 
     return (

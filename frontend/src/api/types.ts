@@ -34,6 +34,50 @@ export interface TaskCreateRequest {
     description?: string;
     priority?: number;
     environment?: string;
+    agent_type?: string;
+    language?: string;
+    auto_execute?: boolean;
+}
+
+// ── Agent Marketplace Types ────────────────────────────────────────────
+
+export interface AgentCatalogEntry {
+    id: string;
+    name: string;
+    description: string;
+    platform: string;
+    languages: string[];
+    capabilities: string[];
+    icon: string;
+    status: 'available' | 'coming_soon' | 'beta';
+    config_defaults: Record<string, string>;
+}
+
+// ── Execution Types ────────────────────────────────────────────────────
+
+export interface ExecutionTriggerResponse {
+    task_id: string;
+    status: string;
+    message?: string | null;
+    output?: string | null;
+    error?: string | null;
+    code?: string | null;
+    language?: string | null;
+    job_id?: string | null;
+    duration_ms?: number | null;
+}
+
+export interface ExecutionRecord {
+    id: string;
+    task_id: string;
+    environment: string;
+    status: string;
+    output: string | null;
+    error: string | null;
+    duration_ms: number | null;
+    started_at: string | null;
+    completed_at: string | null;
+    created_at: string;
 }
 
 export interface TransitionRequest {
@@ -109,54 +153,56 @@ export interface HealthResponse {
 
 export const STATE_COLORS: Record<string, string> = {
     SUBMITTED: '#6366f1',
-    VALIDATING: '#8b5cf6',
+    PARSING: '#8b5cf6',
+    PARSED: '#7c3aed',
+    PARSE_FAILED: '#ef4444',
     PLANNING: '#a78bfa',
-    READY: '#22d3ee',
-    ASSIGNED: '#06b6d4',
-    EXECUTING: '#f59e0b',
-    AWAITING_REVIEW: '#f97316',
-    REVIEWING: '#fb923c',
+    PLANNED: '#818cf8',
+    AGENT_ASSIGNMENT: '#22d3ee',
+    AGENT_ASSIGNED: '#06b6d4',
+    IN_DEVELOPMENT: '#f59e0b',
+    CODE_GENERATED: '#eab308',
+    DEV_FAILED: '#ef4444',
+    IN_VALIDATION: '#f97316',
+    VALIDATION_PASSED: '#10b981',
+    VALIDATION_FAILED: '#ef4444',
+    OPTIMIZATION_PENDING: '#fb923c',
+    IN_OPTIMIZATION: '#d97706',
+    OPTIMIZED: '#059669',
+    APPROVAL_PENDING: '#f59e0b',
+    IN_REVIEW: '#fb923c',
     APPROVED: '#10b981',
     REJECTED: '#ef4444',
-    SELF_CORRECTING: '#eab308',
-    RE_EXECUTING: '#d97706',
-    ESCALATED: '#dc2626',
-    HUMAN_REVIEW: '#e11d48',
-    PAUSED: '#64748b',
-    RESUMING: '#94a3b8',
-    CHECKPOINTED: '#475569',
-    FINALIZING: '#059669',
-    COMPLETE: '#16a34a',
-    FAILED: '#dc2626',
+    DEPLOYING: '#3b82f6',
+    DEPLOYED: '#059669',
+    COMPLETED: '#16a34a',
     CANCELLED: '#6b7280',
-    TIMED_OUT: '#9333ea',
-    ARCHIVING: '#78716c',
-    ARCHIVED: '#a8a29e',
 };
 
 export const STATE_LABELS: Record<string, string> = {
     SUBMITTED: 'Submitted',
-    VALIDATING: 'Validating',
+    PARSING: 'Parsing',
+    PARSED: 'Parsed',
+    PARSE_FAILED: 'Parse Failed',
     PLANNING: 'Planning',
-    READY: 'Ready',
-    ASSIGNED: 'Assigned',
-    EXECUTING: 'Executing',
-    AWAITING_REVIEW: 'Awaiting Review',
-    REVIEWING: 'Reviewing',
+    PLANNED: 'Planned',
+    AGENT_ASSIGNMENT: 'Assigning Agent',
+    AGENT_ASSIGNED: 'Agent Assigned',
+    IN_DEVELOPMENT: 'In Development',
+    CODE_GENERATED: 'Code Generated',
+    DEV_FAILED: 'Dev Failed',
+    IN_VALIDATION: 'Validating',
+    VALIDATION_PASSED: 'Validation Passed',
+    VALIDATION_FAILED: 'Validation Failed',
+    OPTIMIZATION_PENDING: 'Optimization Pending',
+    IN_OPTIMIZATION: 'Optimizing',
+    OPTIMIZED: 'Optimized',
+    APPROVAL_PENDING: 'Awaiting Approval',
+    IN_REVIEW: 'In Review',
     APPROVED: 'Approved',
     REJECTED: 'Rejected',
-    SELF_CORRECTING: 'Self-Correcting',
-    RE_EXECUTING: 'Re-Executing',
-    ESCALATED: 'Escalated',
-    HUMAN_REVIEW: 'Human Review',
-    PAUSED: 'Paused',
-    RESUMING: 'Resuming',
-    CHECKPOINTED: 'Checkpointed',
-    FINALIZING: 'Finalizing',
-    COMPLETE: 'Complete',
-    FAILED: 'Failed',
+    DEPLOYING: 'Deploying',
+    DEPLOYED: 'Deployed',
+    COMPLETED: 'Completed',
     CANCELLED: 'Cancelled',
-    TIMED_OUT: 'Timed Out',
-    ARCHIVING: 'Archiving',
-    ARCHIVED: 'Archived',
 };

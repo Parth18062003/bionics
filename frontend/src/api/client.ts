@@ -24,6 +24,9 @@ import type {
     ArtifactSummary,
     ArtifactDetail,
     HealthResponse,
+    AgentCatalogEntry,
+    ExecutionTriggerResponse,
+    ExecutionRecord,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -175,4 +178,26 @@ export async function getArtifact(
 
 export async function checkHealth(): Promise<HealthResponse> {
     return apiFetch<HealthResponse>('/health');
+}
+
+// ── Marketplace API ────────────────────────────────────────────────────
+
+export async function listMarketplaceAgents(): Promise<AgentCatalogEntry[]> {
+    return apiFetch<AgentCatalogEntry[]>('/api/v1/marketplace/agents');
+}
+
+export async function getMarketplaceAgent(agentId: string): Promise<AgentCatalogEntry> {
+    return apiFetch<AgentCatalogEntry>(`/api/v1/marketplace/agents/${agentId}`);
+}
+
+// ── Execution API ──────────────────────────────────────────────────────
+
+export async function executeTask(taskId: string): Promise<ExecutionTriggerResponse> {
+    return apiFetch<ExecutionTriggerResponse>(`/api/v1/tasks/${taskId}/execute`, {
+        method: 'POST',
+    });
+}
+
+export async function getExecutions(taskId: string): Promise<ExecutionRecord[]> {
+    return apiFetch<ExecutionRecord[]>(`/api/v1/executions/${taskId}`);
 }
