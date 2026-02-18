@@ -311,12 +311,14 @@ class DatabricksClient(BaseDatabricksClient):
         cluster_id: str | None = None,
         catalog: str | None = None,
         schema: str | None = None,
+        job_id: str | None = None,
     ) -> None:
         self._host = host
         self._warehouse_id = warehouse_id
         self._cluster_id = cluster_id
         self._catalog = catalog
         self._schema = schema
+        self._job_id = job_id
         self._workspace_client = None
         self._execution_cache: dict[str, dict[str, Any]] = {}
 
@@ -334,6 +336,7 @@ class DatabricksClient(BaseDatabricksClient):
             cluster_id=settings.databricks_cluster_id,
             catalog=settings.databricks_catalog,
             schema=settings.databricks_schema,
+            job_id=getattr(settings, 'databricks_job_id', None),
         )
 
     def _get_workspace_client(self):
@@ -379,6 +382,116 @@ class DatabricksClient(BaseDatabricksClient):
         else:
             return await self._submit_sql(task_id, code, environment, correlation_id)
 
+    @staticmethod
+    def _is_simple_query(code: str, language: str) -> bool:
+        """
+        Determine if code is a simple query that can be executed directly.
+
+        Simple queries:
+        - SQL SELECT statements < 200 characters
+        - No CTEs, JOINs, subqueries, or complex logic
+        - Single statement
+        """
+        if language.lower() != "sql":
+            return False
+
+        code_upper = code.strip().upper()
+
+        # Only simple SELECT statements
+        if not code_upper.startswith("SELECT"):
+            return False
+
+        # Too long = complex query
+        if len(code) > 200:
+            return False
+
+        # Has complex features = complex query
+        complex_keywords = [
+            "WITH",      # CTE
+            "JOIN",      # Joins
+            "UNION",     # Unions
+            "INSERT",    # Not a SELECT
+            "UPDATE",    # Not a SELECT
+            "DELETE",    # Not a SELECT
+            "CREATE",    # Not a SELECT
+            "DROP",      # Dangerous
+            "ALTER",     # Dangerous
+            ";",         # Multiple statements
+        ]
+
+        for keyword in complex_keywords:
+            if keyword in code_upper:
+                return False
+
+        return True
+
+    async def _submit_job_run(
+        self,
+        task_id: uuid.UUID,
+        code: str,
+        environment: str,
+        correlation_id: str | None = None,
+        language: str = "sql",
+    ) -> JobSubmission:
+        """Submit code as a job run using a pre-configured Databricks job."""
+        w = self._get_workspace_client()
+
+        with create_span("databricks.job_run_submit", job_id=self._job_id, task_id=str(task_id)) as span:
+            ctx = TracingContext(correlation_id=correlation_id)
+            trace_headers = ctx.inject_headers({})
+
+            logger.info(
+                "databricks.job_run_submitting",
+                job_id=self._job_id,
+                task_id=str(task_id),
+                environment=environment,
+                language=language,
+                correlation_id=correlation_id,
+            )
+
+            import asyncio
+            from databricks.sdk.service.jobs import RunNowResponse
+
+            # Submit job run with parameters
+            run_response = await asyncio.to_thread(
+                w.jobs.run_now,
+                job_id=int(self._job_id),
+                notebook_params={
+                    "task_id": str(task_id),
+                    "code": code,
+                    "environment": environment,
+                    "language": language,
+                    "correlation_id": correlation_id or "",
+                },
+            )
+
+            run_id = str(run_response.run_id)
+
+            self._execution_cache[run_id] = {
+                "task_id": task_id,
+                "environment": environment.upper(),
+                "correlation_id": correlation_id,
+                "trace_headers": trace_headers,
+                "code": code,
+                "language": language,
+                "job_id": self._job_id,
+            }
+
+            logger.info(
+                "databricks.job_run_submitted",
+                run_id=run_id,
+                job_id=self._job_id,
+                task_id=str(task_id),
+                environment=environment,
+                correlation_id=correlation_id,
+            )
+
+            return JobSubmission(
+                job_id=run_id,
+                task_id=task_id,
+                environment=environment.upper(),
+            )
+
     async def _submit_sql(
         self,
         task_id: uuid.UUID,
@@ -407,10 +520,12 @@ class DatabricksClient(BaseDatabricksClient):
             )
 
             import asyncio
+            from databricks.sdk.service.sql import ExecuteStatementRequestOnWaitTimeout as TimeoutAction
 
             wait_timeout = "50s"
-            on_wait_timeout = "CANCEL"
 
+            # Note: Statement Execution API doesn't support %python magic commands
+            # The API automatically handles the code execution
             response = await asyncio.to_thread(
                 w.statement_execution.execute_statement,
                 statement=code,
@@ -418,7 +533,7 @@ class DatabricksClient(BaseDatabricksClient):
                 catalog=self._catalog,
                 schema=self._schema,
                 wait_timeout=wait_timeout,
-                on_wait_timeout=on_wait_timeout,
+                on_wait_timeout=TimeoutAction.CANCEL,
             )
 
             statement_id = response.statement_id
@@ -446,6 +561,44 @@ class DatabricksClient(BaseDatabricksClient):
                 environment=environment.upper(),
             )
 
+    @staticmethod
+    def _looks_like_python(code: str) -> bool:
+        """
+        Detect if code is Python rather than SQL.
+
+        Heuristics:
+        - Starts with import, def, class, if, for, while, try, etc.
+        - Contains print(, exec(, eval(
+        - No SQL keywords at the start
+        """
+        code_stripped = code.strip()
+        code_lower = code_stripped.lower()
+
+        # SQL keywords that code might start with
+        sql_keywords = [
+            "select", "with", "insert", "update", "delete", "create",
+            "drop", "alter", "use", "show", "describe", "explain"
+        ]
+
+        # Check if starts with SQL keyword
+        for keyword in sql_keywords:
+            if code_lower.startswith(keyword):
+                return False
+
+        # Python indicators
+        python_indicators = [
+            "import ", "from ", "def ", "class ", "if ", "for ",
+            "while ", "try:", "except", "with ", "async ",
+            "print(", "exec(", "eval(", "lambda", "yield"
+        ]
+
+        for indicator in python_indicators:
+            if code_lower.startswith(indicator):
+                return True
+
+        # Default to SQL if ambiguous
+        return False
+
     async def _submit_python(
         self,
         task_id: uuid.UUID,
@@ -453,7 +606,92 @@ class DatabricksClient(BaseDatabricksClient):
         environment: str,
         correlation_id: str | None = None,
     ) -> JobSubmission:
-        """Submit Python code via Command Execution API."""
+        """Submit Python code via SQL Warehouse with %python magic or Compute Cluster."""
+
+        # Prefer warehouse over cluster (warehouse is more reliable)
+        if self._warehouse_id:
+            # Use SQL warehouse with %python magic command
+            return await self._submit_python_via_warehouse(task_id, code, environment, correlation_id)
+        elif self._cluster_id:
+            # Fall back to cluster if warehouse not available
+            return await self._submit_python_via_cluster(task_id, code, environment, correlation_id)
+        else:
+            raise ValueError(
+                "Either AADAP_DATABRICKS_WAREHOUSE_ID or AADAP_DATABRICKS_CLUSTER_ID is required for Python execution"
+            )
+
+    async def _submit_python_via_warehouse(
+        self,
+        task_id: uuid.UUID,
+        code: str,
+        environment: str,
+        correlation_id: str | None = None,
+    ) -> JobSubmission:
+        """Submit Python code via SQL Warehouse using Statement Execution API."""
+        w = self._get_workspace_client()
+
+        with create_span("databricks.python_warehouse_submit", task_id=str(task_id)) as span:
+            ctx = TracingContext(correlation_id=correlation_id)
+            trace_headers = ctx.inject_headers({})
+
+            logger.info(
+                "databricks.python_warehouse_submitting",
+                task_id=str(task_id),
+                environment=environment,
+                warehouse_id=self._warehouse_id,
+                correlation_id=correlation_id,
+            )
+
+            import asyncio
+            from databricks.sdk.service.sql import ExecuteStatementRequestOnWaitTimeout as TimeoutAction
+
+            # Note: Statement Execution API doesn't support %python magic commands
+            # The API automatically detects the language from the code
+            wait_timeout = "50s"
+
+            response = await asyncio.to_thread(
+                w.statement_execution.execute_statement,
+                statement=code,
+                warehouse_id=self._warehouse_id,
+                catalog=self._catalog,
+                schema=self._schema,
+                wait_timeout=wait_timeout,
+                on_wait_timeout=TimeoutAction.CANCEL,
+            )
+
+            statement_id = response.statement_id
+
+            self._execution_cache[statement_id] = {
+                "task_id": task_id,
+                "environment": environment.upper(),
+                "correlation_id": correlation_id,
+                "trace_headers": trace_headers,
+                "code": code,
+                "language": "python",
+            }
+
+            logger.info(
+                "databricks.python_warehouse_submitted",
+                statement_id=statement_id,
+                task_id=str(task_id),
+                environment=environment,
+                correlation_id=correlation_id,
+            )
+
+            return JobSubmission(
+                job_id=statement_id,
+                task_id=task_id,
+                environment=environment.upper(),
+            )
+
+    async def _submit_python_via_cluster(
+        self,
+        task_id: uuid.UUID,
+        code: str,
+        environment: str,
+        correlation_id: str | None = None,
+    ) -> JobSubmission:
+        """Submit Python code via Compute Cluster using Command Execution API."""
         if not self._cluster_id:
             raise ValueError(
                 "AADAP_DATABRICKS_CLUSTER_ID is required for Python execution"
@@ -461,12 +699,12 @@ class DatabricksClient(BaseDatabricksClient):
 
         w = self._get_workspace_client()
 
-        with create_span("databricks.python_submit", task_id=str(task_id)) as span:
+        with create_span("databricks.python_cluster_submit", task_id=str(task_id)) as span:
             ctx = TracingContext(correlation_id=correlation_id)
             trace_headers = ctx.inject_headers({})
 
             logger.info(
-                "databricks.python_submitting",
+                "databricks.python_cluster_submitting",
                 task_id=str(task_id),
                 environment=environment,
                 cluster_id=self._cluster_id,
@@ -474,20 +712,23 @@ class DatabricksClient(BaseDatabricksClient):
             )
 
             import asyncio
+            from databricks.sdk.service.compute import Language
 
+            # Create a context for Python execution
             context_response = await asyncio.to_thread(
-                w.command_execution.create_context,
+                w.command_execution.create,
                 cluster_id=self._cluster_id,
-                language="python",
+                language=Language.PYTHON,
             )
 
             context_id = context_response.id
 
+            # Execute the Python command in the context
             command_response = await asyncio.to_thread(
-                w.command_execution.execute_command,
+                w.command_execution.execute,
                 cluster_id=self._cluster_id,
                 context_id=context_id,
-                language="python",
+                language=Language.PYTHON,
                 command=code,
             )
 
@@ -505,7 +746,7 @@ class DatabricksClient(BaseDatabricksClient):
             }
 
             logger.info(
-                "databricks.python_submitted",
+                "databricks.python_cluster_submitted",
                 command_id=command_id,
                 context_id=context_id,
                 task_id=str(task_id),
@@ -525,9 +766,67 @@ class DatabricksClient(BaseDatabricksClient):
         language = execution_info.get("language", "sql")
 
         if language == "python":
-            return await self._get_python_status(job_id, execution_info)
+            # Check if it's via warehouse (no cluster_id) or via cluster
+            if execution_info.get("cluster_id"):
+                return await self._get_python_status(job_id, execution_info)
+            else:
+                # It's via warehouse, so treat as SQL statement
+                return await self._get_sql_status(job_id)
         else:
             return await self._get_sql_status(job_id)
+
+    async def _get_job_run_status(self, run_id: str, execution_info: dict) -> JobStatus:
+        """Get status of a Databricks job run."""
+        w = self._get_workspace_client()
+
+        try:
+            import asyncio
+            run = await asyncio.to_thread(
+                w.jobs.get_run,
+                run_id=int(run_id),
+            )
+
+            # Log run details for debugging
+            state_text = self._as_text(run.state) if run.state else None
+            state_message = run.state_message if hasattr(
+                run, 'state_message') else None
+
+            logger.info(
+                "databricks.job_run_status_check",
+                run_id=run_id,
+                state=state_text,
+                state_message=state_message,
+            )
+
+            if run.state:
+                if state_text:
+                    # Map job run states to JobStatus
+                    # TERMINATED can be success or failure - check state_message
+                    if state_text == "TERMINATED":
+                        # Check if there's a failure reason
+                        if hasattr(run, 'state_message') and run.state_message:
+                            msg = run.state_message.lower()
+                            if 'failed' in msg or 'error' in msg:
+                                return JobStatus.FAILED
+                        return JobStatus.SUCCESS
+
+                    state_map = {
+                        "PENDING": JobStatus.PENDING,
+                        "RUNNING": JobStatus.RUNNING,
+                        "TERMINATING": JobStatus.RUNNING,
+                        "SKIPPED": JobStatus.CANCELLED,
+                        "INTERNAL_ERROR": JobStatus.FAILED,
+                    }
+                    return state_map.get(state_text, JobStatus.PENDING)
+
+            return JobStatus.PENDING
+        except Exception as e:
+            logger.warning(
+                "databricks.job_run_status_error",
+                run_id=run_id,
+                error=str(e),
+            )
+            return JobStatus.FAILED
 
     async def _get_sql_status(self, statement_id: str) -> JobStatus:
         """Get status of a SQL statement."""
@@ -560,7 +859,7 @@ class DatabricksClient(BaseDatabricksClient):
         import asyncio
         try:
             command = await asyncio.to_thread(
-                w.command_execution.get_command,
+                w.command_execution.get,
                 cluster_id=cluster_id,
                 context_id=context_id,
                 command_id=command_id,
@@ -586,27 +885,117 @@ class DatabricksClient(BaseDatabricksClient):
         language = execution_info.get("language", "sql")
 
         if language == "python":
-            return await self._get_python_output(job_id, execution_info)
+            # Check if it's via warehouse (no cluster_id) or via cluster
+            if execution_info.get("cluster_id"):
+                return await self._get_python_output(job_id, execution_info)
+            else:
+                # It's via warehouse, so treat as SQL statement
+                return await self._get_sql_output(job_id, execution_info)
         else:
             return await self._get_sql_output(job_id, execution_info)
 
-    async def _get_sql_output(self, statement_id: str, execution_info: dict) -> JobResult:
+    async def _get_job_run_output(self, run_id: str, execution_info: dict) -> JobResult:
+        """Retrieve the output of a Databricks job run."""
+        w = self._get_workspace_client()
+        status = await self._get_job_run_status(run_id, execution_info)
+
+        try:
+            import asyncio
+            run = await asyncio.to_thread(
+                w.jobs.get_run,
+                run_id=int(run_id),
+            )
+
+            output = None
+            error = None
+            task_id = execution_info.get("task_id")
+
+            # Try to retrieve execution log from notebook exit message
+            if hasattr(run, 'state_message') and run.state_message:
+                try:
+                    import json
+                    # The notebook exit message contains the execution log JSON
+                    exec_log = json.loads(run.state_message)
+                    output = exec_log.get("output")
+                    if exec_log.get("error"):
+                        error = exec_log.get("error")
+                    # Override status based on notebook execution status
+                    if exec_log.get("status") == "FAILED":
+                        status = JobStatus.FAILED
+
+                    logger.info(
+                        "databricks.execution_log_retrieved",
+                        task_id=str(task_id),
+                        run_id=run_id,
+                        status=exec_log.get("status"),
+                    )
+                except (json.JSONDecodeError, KeyError):
+                    # Not a JSON log, use as plain output
+                    output = run.state_message
+
+            # Fallback if no log file
+            if not output:
+                if hasattr(run, 'state_message') and run.state_message:
+                    output = run.state_message
+                elif hasattr(run, 'run_page_url') and run.run_page_url:
+                    output = f"Job completed successfully. View details: {run.run_page_url}"
+
+            # Check for failure
+            if status == JobStatus.FAILED:
+                if not error:
+                    if hasattr(run, 'run_page_url') and run.run_page_url:
+                        error = f"Job run failed. See details at: {run.run_page_url}"
+                    elif run.state:
+                        state_text = self._as_text(run.state)
+                        error = f"Job run failed with state: {state_text}"
+                    else:
+                        error = "Job run failed"
+
+            return JobResult(
+                job_id=run_id,
+                status=status,
+                output=output or "Job executed (output in Databricks)",
+                error=error,
+                metadata={
+                    "environment": execution_info.get("environment"),
+                    "job_id": execution_info.get("job_id"),
+                    "run_page_url": run.run_page_url if hasattr(run, 'run_page_url') else None,
+                },
+            )
+        except Exception as e:
+            logger.warning(
+                "databricks.job_run_output_error",
+                run_id=run_id,
+                error=str(e),
+            )
+            return JobResult(
+                job_id=run_id,
+                status=status,
+                error=f"Failed to retrieve job output: {str(e)}",
+                metadata={"environment": execution_info.get("environment")},
+            )
+
+    async def _get_sql_output(self, job_id: str, execution_info: dict) -> JobResult:
         """Get output of a SQL statement."""
         w = self._get_workspace_client()
-        status = await self._get_sql_status(statement_id)
+        status = await self._get_sql_status(job_id)
 
         import asyncio
         statement = await asyncio.to_thread(
             w.statement_execution.get_statement,
-            statement_id=statement_id,
+            statement_id=job_id,
         )
 
         duration_ms = None
         if statement.status:
-            if statement.status.start_time and statement.status.end_time:
-                start = statement.status.start_time
-                end = statement.status.end_time
-                duration_ms = int((end - start).total_seconds() * 1000)
+            # Try to calculate duration from state_progress if available
+            if hasattr(statement.status, 'state_progress') and statement.status.state_progress:
+                progress = statement.status.state_progress
+                if hasattr(progress, 'start_time') and hasattr(progress, 'end_time'):
+                    if progress.start_time and progress.end_time:
+                        start = progress.start_time
+                        end = progress.end_time
+                        duration_ms = int((end - start).total_seconds() * 1000)
 
         output = None
         error = None
@@ -635,7 +1024,7 @@ class DatabricksClient(BaseDatabricksClient):
                     output = "Statement executed successfully (no data returned)"
 
         return JobResult(
-            job_id=statement_id,
+            job_id=job_id,
             status=status,
             output=output,
             error=error,
@@ -672,7 +1061,7 @@ class DatabricksClient(BaseDatabricksClient):
         import asyncio
         try:
             command = await asyncio.to_thread(
-                w.command_execution.get_command,
+                w.command_execution.get,
                 cluster_id=cluster_id,
                 context_id=context_id,
                 command_id=command_id,

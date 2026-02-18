@@ -16,11 +16,14 @@ const PLATFORM_ICONS: Record<string, string> = {
     'Microsoft Fabric': '🔷',
 };
 
+const PLATFORM_FILTERS = ['All', 'Azure Databricks', 'Microsoft Fabric'] as const;
+
 export default function MarketplacePage() {
     const router = useRouter();
     const [agents, setAgents] = useState<AgentCatalogEntry[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [platformFilter, setPlatformFilter] = useState<string>('All');
 
     useEffect(() => {
         loadAgents();
@@ -44,6 +47,10 @@ export default function MarketplacePage() {
         router.push(`/tasks/new?${params}`);
     }
 
+    const filteredAgents = platformFilter === 'All'
+        ? agents
+        : agents.filter((a) => a.platform === platformFilter);
+
     if (loading) {
         return <div className="loading-page"><div className="loading-spinner" /> Loading marketplace...</div>;
     }
@@ -57,12 +64,35 @@ export default function MarketplacePage() {
 
             {error && <div className="error-banner">⚠ {error}</div>}
 
+            {/* Platform Filter Tabs */}
+            <div className="flex items-center gap-sm" style={{ marginBottom: 'var(--space-xl)' }}>
+                {PLATFORM_FILTERS.map((plat) => {
+                    const count = plat === 'All' ? agents.length : agents.filter((a) => a.platform === plat).length;
+                    const isActive = platformFilter === plat;
+                    return (
+                        <button
+                            key={plat}
+                            className={`btn ${isActive ? 'btn-primary' : 'btn-ghost'} btn-sm`}
+                            onClick={() => setPlatformFilter(plat)}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 'var(--space-xs)',
+                            }}
+                        >
+                            {plat !== 'All' && <span>{PLATFORM_ICONS[plat] || '🔧'}</span>}
+                            {plat} ({count})
+                        </button>
+                    );
+                })}
+            </div>
+
             <div style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
                 gap: 'var(--space-xl)',
             }}>
-                {agents.map((agent) => {
+                {filteredAgents.map((agent) => {
                     const status = STATUS_STYLES[agent.status] || STATUS_STYLES.coming_soon;
                     const isDisabled = agent.status === 'coming_soon';
 

@@ -78,6 +78,10 @@ export interface ExecutionRecord {
     started_at: string | null;
     completed_at: string | null;
     created_at: string;
+    platform?: string | null;
+    code?: string | null;
+    language?: string | null;
+    job_id?: string | null;
 }
 
 export interface TransitionRequest {

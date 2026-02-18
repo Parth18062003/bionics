@@ -19,6 +19,7 @@ export default function TaskDetailPage() {
     const [error, setError] = useState<string | null>(null);
     const [executing, setExecuting] = useState(false);
     const [execResult, setExecResult] = useState<string | null>(null);
+    const [expandedCode, setExpandedCode] = useState<Record<string, boolean>>({});
 
     useEffect(() => {
         loadDetail();
@@ -220,12 +221,73 @@ export default function TaskDetailPage() {
                                             {exec.status.toUpperCase()}
                                         </span>
                                         <span className="text-xs text-secondary">{exec.environment}</span>
+                                        {/* Platform badge */}
+                                        {exec.platform && (
+                                            <span className="badge" style={{
+                                                background: exec.platform === 'Microsoft Fabric' ? 'rgba(59,130,246,0.12)' : 'rgba(245,158,11,0.12)',
+                                                color: exec.platform === 'Microsoft Fabric' ? '#60a5fa' : '#fbbf24',
+                                                fontSize: 'var(--font-size-xs)',
+                                            }}>
+                                                {exec.platform === 'Microsoft Fabric' ? '🔷' : '⚡'} {exec.platform}
+                                            </span>
+                                        )}
                                     </div>
                                     <div className="text-xs text-secondary">
+                                        {exec.job_id && <span className="font-mono">Job: {exec.job_id} · </span>}
                                         {exec.duration_ms != null && <span>{exec.duration_ms}ms · </span>}
                                         {formatTime(exec.created_at)}
                                     </div>
                                 </div>
+
+                                {/* Generated Code (collapsible) */}
+                                {exec.code && (
+                                    <div style={{ marginBottom: 'var(--space-sm)' }}>
+                                        <button
+                                            type="button"
+                                            className="btn btn-ghost btn-sm"
+                                            style={{
+                                                padding: '2px 8px',
+                                                marginBottom: 'var(--space-xs)',
+                                                fontSize: 'var(--font-size-xs)',
+                                                fontWeight: 500,
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: 'var(--space-xs)',
+                                            }}
+                                            onClick={() =>
+                                                setExpandedCode((prev) => ({
+                                                    ...prev,
+                                                    [exec.id]: !prev[exec.id],
+                                                }))
+                                            }
+                                        >
+                                            <span style={{
+                                                transform: expandedCode[exec.id] ? 'rotate(90deg)' : 'rotate(0deg)',
+                                                transition: 'transform 0.15s',
+                                                display: 'inline-block',
+                                            }}>▶</span>
+                                            Generated Code{exec.language ? ` (${exec.language})` : ''}
+                                        </button>
+                                        {expandedCode[exec.id] && (
+                                            <pre style={{
+                                                padding: 'var(--space-md)',
+                                                background: 'var(--color-bg-primary)',
+                                                borderRadius: 'var(--radius-sm)',
+                                                fontFamily: 'var(--font-mono)',
+                                                fontSize: 'var(--font-size-xs)',
+                                                color: 'var(--color-accent)',
+                                                whiteSpace: 'pre-wrap',
+                                                wordBreak: 'break-word',
+                                                maxHeight: 400,
+                                                overflow: 'auto',
+                                                border: '1px solid var(--color-border)',
+                                            }}>
+                                                {exec.code}
+                                            </pre>
+                                        )}
+                                    </div>
+                                )}
+
                                 {exec.output && (
                                     <div style={{ marginBottom: 'var(--space-sm)' }}>
                                         <div className="text-xs text-secondary" style={{ marginBottom: 'var(--space-xs)', fontWeight: 500 }}>Output</div>

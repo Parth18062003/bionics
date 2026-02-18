@@ -43,6 +43,12 @@ from aadap.integrations.databricks_client import (
     JobStatus,
     MockDatabricksClient,
 )
+from aadap.integrations.fabric_client import (
+    BaseFabricClient,
+    FabricClient,
+    JobStatus as FabricJobStatus,
+    MockFabricClient,
+)
 from aadap.integrations.llm_client import (
     AzureOpenAIClient,
     BaseLLMClient,
@@ -77,19 +83,65 @@ _PYTHON_SYSTEM_PROMPT = (
     "- If the task is ambiguous, make reasonable assumptions and document them in comments.\n"
 )
 
+_FABRIC_PYTHON_SYSTEM_PROMPT = (
+    "You are an expert Microsoft Fabric Python/PySpark developer. Generate production-quality "
+    "Python code for data engineering tasks on Microsoft Fabric Spark notebooks.\n\n"
+    "RULES:\n"
+    "- Output ONLY the Python code, no markdown fences, no explanation.\n"
+    "- Use PySpark APIs where applicable.\n"
+    "- Use Fabric-native APIs: notebookutils, mssparkutils, sempy.\n"
+    "- Access Lakehouse tables via spark.read.table() or spark.sql().\n"
+    "- Include error handling.\n"
+    "- Do NOT use dbutils — use notebookutils or mssparkutils instead.\n"
+    "- If the task is ambiguous, make reasonable assumptions and document them in comments.\n"
+)
+
+_FABRIC_SCALA_SYSTEM_PROMPT = (
+    "You are an expert Microsoft Fabric Scala/Spark developer. Generate production-quality "
+    "Scala code for data processing tasks on Microsoft Fabric Spark notebooks.\n\n"
+    "RULES:\n"
+    "- Output ONLY the Scala code, no markdown fences, no explanation.\n"
+    "- Use Spark DataFrame API for data operations.\n"
+    "- Access Lakehouse tables via spark.read.table() or spark.sql().\n"
+    "- Include proper type annotations and error handling.\n"
+    "- Prefer functional style: map, flatMap, filter.\n"
+    "- If the task is ambiguous, make reasonable assumptions and document them in comments.\n"
+)
+
+_FABRIC_SQL_SYSTEM_PROMPT = (
+    "You are an expert Microsoft Fabric SQL developer. Generate production-quality "
+    "SQL queries for Fabric Lakehouse SQL endpoint or Warehouse.\n\n"
+    "RULES:\n"
+    "- Output ONLY the SQL code, no markdown fences, no explanation.\n"
+    "- Use T-SQL or Spark SQL syntax as appropriate for Fabric.\n"
+    "- Include comments in the SQL for clarity.\n"
+    "- Leverage Delta Lake features (MERGE, TIME TRAVEL) where appropriate.\n"
+    "- If the task is ambiguous, make reasonable assumptions and document them in comments.\n"
+)
+
 
 def _build_code_gen_prompt(
     title: str,
     description: str | None,
     environment: str,
     language: str,
+    platform: str = "databricks",
 ) -> str:
     """Build a prompt for code generation from task metadata."""
-    system = _SQL_SYSTEM_PROMPT if language == "sql" else _PYTHON_SYSTEM_PROMPT
+    if platform == "fabric":
+        system_prompts = {
+            "sql": _FABRIC_SQL_SYSTEM_PROMPT,
+            "scala": _FABRIC_SCALA_SYSTEM_PROMPT,
+            "python": _FABRIC_PYTHON_SYSTEM_PROMPT,
+        }
+        system = system_prompts.get(language, _FABRIC_PYTHON_SYSTEM_PROMPT)
+    else:
+        system = _SQL_SYSTEM_PROMPT if language == "sql" else _PYTHON_SYSTEM_PROMPT
     task_block = f"Task: {title}"
     if description:
         task_block += f"\n\nDetails:\n{description}"
     task_block += f"\n\nTarget environment: {environment}"
+    task_block += f"\nPlatform: {platform.title()}"
     return f"{system}\n\n{task_block}\n"
 
 
@@ -109,9 +161,11 @@ class ExecutionService:
         self,
         llm_client: BaseLLMClient,
         databricks_client: BaseDatabricksClient,
+        fabric_client: BaseFabricClient | None = None,
     ) -> None:
         self._llm = llm_client
         self._dbx = databricks_client
+        self._fabric = fabric_client
         self._analyzer = StaticAnalyzer()
         self._event_store = EventStore(get_db_session)
 
@@ -143,7 +197,16 @@ class ExecutionService:
             dbx = MockDatabricksClient()
             logger.info("execution_service.databricks", client="Mock")
 
-        return cls(llm_client=llm, databricks_client=dbx)
+        # Fabric client
+        fabric: BaseFabricClient | None = None
+        if settings.fabric_tenant_id and settings.fabric_client_id:
+            fabric = FabricClient.from_settings()
+            logger.info("execution_service.fabric", client="Real")
+        else:
+            fabric = MockFabricClient()
+            logger.info("execution_service.fabric", client="Mock")
+
+        return cls(llm_client=llm, databricks_client=dbx, fabric_client=fabric)
 
     # ── Public API ──────────────────────────────────────────────────────
 
@@ -161,6 +224,7 @@ class ExecutionService:
             # 1. Load task
             task = await self._load_task(task_id)
             language = self._detect_language(task)
+            platform = self._detect_platform(task)
 
             # 2. SUBMITTED → PARSING
             await self._transition(task_id, TaskState.SUBMITTED, TaskState.PARSING)
@@ -184,7 +248,7 @@ class ExecutionService:
             await self._transition(task_id, TaskState.AGENT_ASSIGNED, TaskState.IN_DEVELOPMENT)
 
             # 9. Generate code via LLM
-            code = await self._generate_code(task, language)
+            code = await self._generate_code(task, language, platform)
 
             # 10. Store generated code as artifact
             code_artifact_id = await self._store_artifact(
@@ -261,22 +325,32 @@ class ExecutionService:
             await self._transition(task_id, TaskState.IN_REVIEW, TaskState.APPROVED)
             await self._transition(task_id, TaskState.APPROVED, TaskState.DEPLOYING)
 
-            # 17. Execute on Databricks SQL Warehouse
-            execution_result = await self._execute_on_databricks(
-                task_id=task_id,
-                code=code,
-                environment=task.environment,
-                language=language,
-                code_artifact_id=code_artifact_id,
-            )
+            # 17. Execute on target platform (Databricks or Fabric)
+            if platform == "fabric":
+                execution_result = await self._execute_on_fabric(
+                    task_id=task_id,
+                    code=code,
+                    environment=task.environment,
+                    language=language,
+                    code_artifact_id=code_artifact_id,
+                )
+            else:
+                execution_result = await self._execute_on_databricks(
+                    task_id=task_id,
+                    code=code,
+                    environment=task.environment,
+                    language=language,
+                    code_artifact_id=code_artifact_id,
+                )
 
             if execution_result["status"] == "FAILED":
                 await self._transition(task_id, TaskState.DEPLOYING, TaskState.DEV_FAILED)
+                platform_name = "Fabric" if platform == "fabric" else "Databricks"
                 return {
                     "task_id": str(task_id),
                     "status": "DEV_FAILED",
                     "error": execution_result.get("error"),
-                    "message": "Databricks execution failed.",
+                    "message": f"{platform_name} execution failed.",
                 }
 
             # 18. DEPLOYING → DEPLOYED
@@ -358,9 +432,27 @@ class ExecutionService:
         # Infer from agent_type
         if "python" in agent_type.lower() or "pyspark" in agent_type.lower():
             return "python"
+        if "scala" in agent_type.lower():
+            return "scala"
 
-        # Default to SQL for Databricks SQL Warehouse
+        # Default to SQL
         return "sql"
+
+    def _detect_platform(self, task: Task) -> str:
+        """Detect the target platform from task metadata or agent_type."""
+        meta = task.metadata_ or {}
+        agent_type = meta.get("agent_type", "")
+
+        # Explicit platform in metadata
+        if "platform" in meta:
+            return meta["platform"].lower()
+
+        # Infer from agent_type
+        if "fabric" in agent_type.lower():
+            return "fabric"
+
+        # Default to Databricks
+        return "databricks"
 
     async def _transition(
         self,
@@ -394,13 +486,14 @@ class ExecutionService:
             to_state=to_state_enum.value,
         )
 
-    async def _generate_code(self, task: Task, language: str) -> str:
+    async def _generate_code(self, task: Task, language: str, platform: str = "databricks") -> str:
         """Generate code using the LLM for the given task."""
         prompt = _build_code_gen_prompt(
             title=task.title,
             description=task.description,
             environment=task.environment,
             language=language,
+            platform=platform,
         )
 
         response = await self._llm.complete(prompt=prompt, max_tokens=4096)
@@ -557,6 +650,120 @@ class ExecutionService:
                 )
             logger.error(
                 "execution.databricks_error",
+                task_id=str(task_id),
+                error=str(exc),
+            )
+            return {
+                "status": "FAILED",
+                "error": str(exc),
+                "output": None,
+                "job_id": None,
+                "duration_ms": None,
+            }
+
+    async def _execute_on_fabric(
+        self,
+        task_id: uuid.UUID,
+        code: str,
+        environment: str,
+        language: str,
+        code_artifact_id: uuid.UUID | None = None,
+    ) -> dict[str, Any]:
+        """
+        Submit code to Microsoft Fabric and wait for result.
+
+        Records an Execution row in the database for audit.
+        """
+        if self._fabric is None:
+            return {
+                "status": "FAILED",
+                "error": "Fabric client is not configured",
+                "output": None,
+                "job_id": None,
+                "duration_ms": None,
+            }
+
+        # Create execution record
+        execution_id = uuid.uuid4()
+        async with get_db_session() as session:
+            execution = Execution(
+                id=execution_id,
+                task_id=task_id,
+                environment=environment,
+                status="PENDING",
+                code_artifact_id=code_artifact_id,
+                started_at=datetime.now(timezone.utc),
+            )
+            session.add(execution)
+
+        logger.info(
+            "execution.fabric_submit",
+            task_id=str(task_id),
+            execution_id=str(execution_id),
+            language=language,
+            environment=environment,
+        )
+
+        try:
+            # Submit to Fabric
+            submission = await self._fabric.submit_job(
+                task_id=task_id,
+                code=code,
+                environment=environment,
+                language=language,
+            )
+
+            # Poll for completion
+            status = await self._fabric.get_job_status(submission.job_id)
+
+            # Get output
+            job_result = await self._fabric.get_job_output(submission.job_id)
+
+            # Map to canonical status
+            final_status = "SUCCESS" if job_result.status == FabricJobStatus.SUCCESS else "FAILED"
+            async with get_db_session() as session:
+                from sqlalchemy import update
+                await session.execute(
+                    update(Execution)
+                    .where(Execution.id == execution_id)
+                    .values(
+                        status=final_status,
+                        output=job_result.output,
+                        error=job_result.error,
+                        duration_ms=job_result.duration_ms,
+                        completed_at=datetime.now(timezone.utc),
+                        metadata_={
+                            "job_id": submission.job_id,
+                            "language": language,
+                            "platform": "Microsoft Fabric",
+                            **(job_result.metadata or {}),
+                        },
+                    )
+                )
+
+            return {
+                "status": final_status,
+                "output": job_result.output,
+                "error": job_result.error,
+                "job_id": submission.job_id,
+                "duration_ms": job_result.duration_ms,
+            }
+
+        except Exception as exc:
+            # Update execution as FAILED
+            async with get_db_session() as session:
+                from sqlalchemy import update
+                await session.execute(
+                    update(Execution)
+                    .where(Execution.id == execution_id)
+                    .values(
+                        status="FAILED",
+                        error=str(exc),
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                )
+            logger.error(
+                "execution.fabric_error",
                 task_id=str(task_id),
                 error=str(exc),
             )

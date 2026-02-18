@@ -6,7 +6,8 @@ Reusable, governed agent execution framework.
 Public API:
     BaseAgent, AgentState, AgentContext, AgentResult,
     AgentPoolManager, AgentHealthChecker, HealthStatus,
-    TokenTracker, ToolRegistry, ToolDefinition
+    TokenTracker, ToolRegistry, ToolDefinition,
+    DeveloperAgent, FabricAgent
 """
 
 from aadap.agents.base import (
@@ -15,6 +16,13 @@ from aadap.agents.base import (
     AgentResult,
     AgentState,
     BaseAgent,
+)
+from aadap.agents.developer_agent import DeveloperAgent
+from aadap.agents.fabric_agent import FabricAgent
+from aadap.agents.factory import (
+    create_developer_agent,
+    create_fabric_agent,
+    wire_pool,
 )
 from aadap.agents.health import AgentHealthChecker, HealthStatus
 from aadap.agents.pool_manager import (
@@ -45,6 +53,8 @@ __all__ = [
     "AgentState",
     "BaseAgent",
     "DEFAULT_TOKEN_BUDGET",
+    "DeveloperAgent",
+    "FabricAgent",
     "HealthStatus",
     "NoAvailableAgentError",
     "PoolCapacityError",
@@ -54,4 +64,7 @@ __all__ = [
     "ToolNotFoundError",
     "ToolPermissionDeniedError",
     "ToolRegistry",
+    "create_developer_agent",
+    "create_fabric_agent",
+    "wire_pool",
 ]

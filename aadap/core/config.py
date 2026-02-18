@@ -63,9 +63,12 @@ class Settings(BaseSettings):
     )
 
     # Legacy Redis configuration (DEPRECATED: retained for backward compatibility)
-    redis_url: str = Field(default="redis://localhost:6379/0", description="DEPRECATED: unused")
-    redis_default_ttl_seconds: int | None = Field(default=None, description="DEPRECATED: use memory_default_ttl_seconds")
-    redis_max_connections: int = Field(default=20, ge=1, le=200, description="DEPRECATED: unused")
+    redis_url: str = Field(default="redis://localhost:6379/0",
+                           description="DEPRECATED: unused")
+    redis_default_ttl_seconds: int | None = Field(
+        default=None, description="DEPRECATED: use memory_default_ttl_seconds")
+    redis_max_connections: int = Field(
+        default=20, ge=1, le=200, description="DEPRECATED: unused")
 
     def model_post_init(self, __context: Any) -> None:
         """Fallback: if memory_default_ttl_seconds is default but redis_ is set, use redis_."""
@@ -99,6 +102,13 @@ class Settings(BaseSettings):
     databricks_cluster_id: str | None = None
     databricks_catalog: str | None = None
     databricks_schema: str | None = None
+
+    # ── Microsoft Fabric (L3: Integration) ────────────────────────────────
+    fabric_tenant_id: str | None = None
+    fabric_client_id: str | None = None
+    fabric_client_secret: SecretStr | None = None
+    fabric_workspace_id: str | None = None
+    fabric_lakehouse_id: str | None = None
 
 
 @lru_cache(maxsize=1)

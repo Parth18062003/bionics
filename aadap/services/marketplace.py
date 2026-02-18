@@ -109,13 +109,16 @@ _AGENT_CATALOG: list[AgentCatalogEntry] = [
         platform="Microsoft Fabric",
         languages=["scala"],
         capabilities=[
-            "Scala/Spark code generation",
+            "Scala/Spark code generation via Azure AI Foundry",
+            "Execution on Fabric Spark notebooks",
             "Fabric Lakehouse integration",
             "Data pipeline orchestration",
             "Delta Lake operations",
+            "Safety analysis (destructive op detection)",
+            "SPA authentication (Service Principal)",
         ],
         icon="⚡",
-        status="coming_soon",
+        status="available",
         config_defaults={"language": "scala", "environment": "SANDBOX"},
     ),
     AgentCatalogEntry(
@@ -129,14 +132,39 @@ _AGENT_CATALOG: list[AgentCatalogEntry] = [
         platform="Microsoft Fabric",
         languages=["python"],
         capabilities=[
-            "Python notebook generation for Fabric",
-            "Lakehouse data access",
+            "Python/PySpark code generation via Azure AI Foundry",
+            "Execution on Fabric Spark notebooks",
+            "Lakehouse data access via notebookutils/mssparkutils",
             "Semantic model integration",
             "Power BI dataset refresh triggers",
+            "Safety analysis (AST-based)",
+            "SPA authentication (Service Principal)",
         ],
         icon="🔮",
-        status="coming_soon",
+        status="available",
         config_defaults={"language": "python", "environment": "SANDBOX"},
+    ),
+    AgentCatalogEntry(
+        id="fabric-sql",
+        name="Fabric SQL Agent",
+        description=(
+            "Generates and executes SQL queries on Microsoft Fabric "
+            "Lakehouse SQL endpoint or Warehouse. Ideal for data exploration, "
+            "ETL transformations, and analytical queries using T-SQL or Spark SQL."
+        ),
+        platform="Microsoft Fabric",
+        languages=["sql"],
+        capabilities=[
+            "SQL code generation via Azure AI Foundry",
+            "Execution on Fabric Lakehouse SQL endpoint",
+            "Delta Lake support (MERGE, TIME TRAVEL)",
+            "T-SQL and Spark SQL compatibility",
+            "Safety analysis (destructive op detection)",
+            "SPA authentication (Service Principal)",
+        ],
+        icon="🏢",
+        status="available",
+        config_defaults={"language": "sql", "environment": "SANDBOX"},
     ),
     AgentCatalogEntry(
         id="adb-optimization",

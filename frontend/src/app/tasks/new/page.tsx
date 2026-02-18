@@ -15,6 +15,7 @@ export default function NewTaskPage() {
     const [priority, setPriority] = useState(0);
     const [environment, setEnvironment] = useState('SANDBOX');
     const [autoExecute, setAutoExecute] = useState(false);
+    const [selectedLanguage, setSelectedLanguage] = useState<string>('');
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -25,7 +26,10 @@ export default function NewTaskPage() {
     useEffect(() => {
         if (agentParam) {
             getMarketplaceAgent(agentParam)
-                .then(setAgent)
+                .then((a) => {
+                    setAgent(a);
+                    if (a.languages.length > 0) setSelectedLanguage(a.languages[0]);
+                })
                 .catch(() => setError(`Agent "${agentParam}" not found`))
                 .finally(() => setAgentLoading(false));
         }
@@ -45,7 +49,7 @@ export default function NewTaskPage() {
                 priority,
                 environment,
                 agent_type: agent?.id,
-                language: agent?.languages[0],
+                language: selectedLanguage || agent?.languages[0],
                 auto_execute: autoExecute,
             });
             router.push(`/tasks/${task.id}`);
@@ -179,6 +183,27 @@ export default function NewTaskPage() {
                         </div>
                     </div>
 
+                    {/* Language Selector — shown when agent has multiple languages */}
+                    {agent && agent.languages.length > 1 && (
+                        <div className="form-group">
+                            <label className="form-label">Language</label>
+                            <select
+                                className="form-select"
+                                value={selectedLanguage}
+                                onChange={(e) => setSelectedLanguage(e.target.value)}
+                            >
+                                {agent.languages.map((lang) => (
+                                    <option key={lang} value={lang}>
+                                        {lang.charAt(0).toUpperCase() + lang.slice(1)}
+                                    </option>
+                                ))}
+                            </select>
+                            <div className="text-xs text-secondary" style={{ marginTop: 'var(--space-xs)' }}>
+                                Target language for code generation on {agent.platform}.
+                            </div>
+                        </div>
+                    )}
+
                     {/* Auto-Execute Toggle */}
                     <div className="form-group">
                         <label
@@ -201,7 +226,9 @@ export default function NewTaskPage() {
                                     Execute Immediately
                                 </div>
                                 <div className="text-xs text-secondary">
-                                    Automatically run the full pipeline after submission: LLM code generation → safety analysis → Databricks execution.
+                                    {agent?.platform === 'Microsoft Fabric'
+                                        ? 'Automatically run the full pipeline after submission: LLM code generation → safety analysis → Fabric notebook execution.'
+                                        : 'Automatically run the full pipeline after submission: LLM code generation → safety analysis → Databricks execution.'}
                                 </div>
                             </div>
                         </label>

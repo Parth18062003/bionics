@@ -13,3 +13,11 @@ from aadap.integrations.databricks_client import (
     JobSubmission,
     JobResult,
 )
+from aadap.integrations.fabric_client import (
+    BaseFabricClient,
+    MockFabricClient,
+    FabricClient,
+    FabricJobStatus,
+    FabricJobSubmission,
+    FabricJobResult,
+)
