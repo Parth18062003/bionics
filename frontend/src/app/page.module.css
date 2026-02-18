@@ -1,141 +1,205 @@
-.page {
-  --background: #fafafa;
-  --foreground: #fff;
+/* ── Landing Page ────────────────────────────────────────────────────── */
 
-  --text-primary: #000;
-  --text-secondary: #666;
-
-  --button-primary-hover: #383838;
-  --button-secondary-hover: #f2f2f2;
-  --button-secondary-border: #ebebeb;
-
+.landingPage {
+  min-height: calc(100vh - 60px);
   display: flex;
-  min-height: 100vh;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-family: var(--font-geist-sans);
-  background-color: var(--background);
+  padding: 60px 24px 80px;
+  background: var(--color-bg-primary);
 }
 
-.main {
-  display: flex;
-  min-height: 100vh;
-  width: 100%;
-  max-width: 800px;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: space-between;
-  background-color: var(--foreground);
-  padding: 120px 60px;
+/* Hero */
+.hero {
+  text-align: center;
+  margin-bottom: 56px;
 }
 
-.intro {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  text-align: left;
-  gap: 24px;
-}
-
-.intro h1 {
-  max-width: 320px;
-  font-size: 40px;
+.heroEyebrow {
+  display: inline-block;
+  font-size: 11px;
   font-weight: 600;
-  line-height: 48px;
-  letter-spacing: -2.4px;
-  text-wrap: balance;
-  color: var(--text-primary);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 100px;
+  padding: 4px 14px;
+  margin-bottom: 24px;
 }
 
-.intro p {
-  max-width: 440px;
-  font-size: 18px;
-  line-height: 32px;
-  text-wrap: balance;
-  color: var(--text-secondary);
+.heroTitle {
+  font-size: clamp(2rem, 5vw, 3.25rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--color-text-primary);
+  line-height: 1.1;
+  margin: 0 0 16px;
 }
 
-.intro a {
-  font-weight: 500;
-  color: var(--text-primary);
+.heroSubtitle {
+  font-size: 1.05rem;
+  color: var(--color-text-secondary);
+  max-width: 500px;
+  margin: 0 auto;
+  line-height: 1.6;
 }
 
-.ctas {
-  display: flex;
-  flex-direction: row;
+/* Cards Grid */
+.cardsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 28px;
   width: 100%;
-  max-width: 440px;
-  gap: 16px;
-  font-size: 14px;
+  max-width: 960px;
 }
 
-.ctas a {
+/* Platform Card */
+.platformCard {
+  position: relative;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
   align-items: center;
-  height: 40px;
-  padding: 0 16px;
-  border-radius: 128px;
-  border: 1px solid transparent;
-  transition: 0.2s;
+  justify-content: center;
+  text-align: center;
+  padding: 48px 32px 36px;
+  border-radius: 20px;
+  background: var(--card-gradient, var(--color-bg-secondary));
+  border: 1px solid var(--card-border, var(--color-border));
+  text-decoration: none;
+  color: var(--color-text-primary);
+  overflow: hidden;
   cursor: pointer;
-  width: fit-content;
-  font-weight: 500;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+  isolation: isolate;
 }
 
-a.primary {
-  background: var(--text-primary);
-  color: var(--background);
-  gap: 8px;
+.platformCard:hover {
+  transform: translateY(-6px) scale(1.01);
+  box-shadow: 0 20px 60px var(--card-glow, rgba(99, 102, 241, 0.2));
+  border-color: var(--card-accent, var(--color-accent));
 }
 
-a.secondary {
-  border-color: var(--button-secondary-border);
+/* Ambient glow behind the card on hover */
+.cardGlow {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(ellipse at 50% 0%, var(--card-glow, rgba(99, 102, 241, 0.15)) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+  z-index: 0;
 }
 
-/* Enable hover only on non-touch devices */
-@media (hover: hover) and (pointer: fine) {
-  a.primary:hover {
-    background: var(--button-primary-hover);
-    border-color: transparent;
+.platformCard:hover .cardGlow {
+  opacity: 1;
+}
+
+/* Logo */
+.logoWrapper {
+  position: relative;
+  z-index: 1;
+  width: 100px;
+  height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 24px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--card-border, var(--color-border));
+  margin-bottom: 28px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+  transition: box-shadow 0.25s ease;
+}
+
+.platformCard:hover .logoWrapper {
+  box-shadow: 0 8px 32px var(--card-glow, rgba(99, 102, 241, 0.3));
+}
+
+.platformLogo {
+  width: 56px;
+  height: 56px;
+}
+
+/* Text */
+.platformName {
+  position: relative;
+  z-index: 1;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: 8px;
+  letter-spacing: -0.02em;
+}
+
+.platformDesc {
+  position: relative;
+  z-index: 1;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 28px;
+  line-height: 1.5;
+}
+
+/* Arrow CTA */
+.cardArrow {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--card-accent, var(--color-accent));
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.platformCard:hover .cardArrow {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .cardsGrid {
+    grid-template-columns: 1fr;
+    max-width: 380px;
+    gap: 20px;
   }
 
-  a.secondary:hover {
-    background: var(--button-secondary-hover);
-    border-color: transparent;
+  .heroTitle {
+    font-size: 2rem;
+  }
+
+  .platformCard {
+    padding: 36px 28px;
   }
 }
 
-@media (max-width: 600px) {
-  .main {
-    padding: 48px 24px;
+@media (min-width: 769px) and (max-width: 1024px) {
+  .cardsGrid {
+    grid-template-columns: repeat(3, 1fr);
+    max-width: 860px;
+    gap: 20px;
   }
 
-  .intro {
-    gap: 16px;
+  .platformCard {
+    padding: 36px 20px;
   }
 
-  .intro h1 {
-    font-size: 32px;
-    line-height: 40px;
-    letter-spacing: -1.92px;
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  .logo {
-    filter: invert();
+  .logoWrapper {
+    width: 84px;
+    height: 84px;
   }
 
-  .page {
-    --background: #000;
-    --foreground: #000;
-
-    --text-primary: #ededed;
-    --text-secondary: #999;
-
-    --button-primary-hover: #ccc;
-    --button-secondary-hover: #1a1a1a;
-    --button-secondary-border: #1a1a1a;
+  .platformLogo {
+    width: 48px;
+    height: 48px;
   }
 }

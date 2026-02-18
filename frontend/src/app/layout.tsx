@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import './globals.css';
 
 const NAV_LINKS = [
-  { href: '/', label: 'Dashboard' },
+  { href: '/dashboard', label: 'Dashboard' },
   { href: '/marketplace', label: 'Marketplace' },
   { href: '/tasks', label: 'Tasks' },
   { href: '/tasks/new', label: 'New Task' },

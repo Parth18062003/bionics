@@ -1,205 +1,113 @@
-'use client';
-
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { listTasks, listApprovals, checkHealth } from '@/api/client';
-import type { Task, Approval, HealthResponse } from '@/api/types';
-import { STATE_COLORS, STATE_LABELS } from '@/api/types';
+import styles from './page.module.css';
 
-export default function DashboardPage() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [approvals, setApprovals] = useState<Approval[]>([]);
-  const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+const PLATFORMS = [
+  {
+    id: 'azure',
+    name: 'Microsoft Azure',
+    description: 'Enterprise cloud from Microsoft',
+    logo: (
+      <svg viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg" className={styles.platformLogo}>
+        <defs>
+          <linearGradient id="azure-a" x1="-.978" x2="40.425" y1="62.801" y2="-1.955" gradientTransform="scale(.75)" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stopColor="#114a8b" />
+            <stop offset="1" stopColor="#0669bc" />
+          </linearGradient>
+          <linearGradient id="azure-b" x1="41.644" x2="51.429" y1="52.905" y2="49.417" gradientTransform="scale(.75)" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stopOpacity=".3" />
+            <stop offset=".071" stopOpacity=".2" />
+            <stop offset=".321" stopOpacity=".1" />
+            <stop offset=".623" stopOpacity=".05" />
+            <stop offset="1" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="azure-c" x1="33.001" x2="88.21" y1="66.061" y2="0.149" gradientTransform="scale(.75)" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stopColor="#3ccbf4" />
+            <stop offset="1" stopColor="#2892df" />
+          </linearGradient>
+        </defs>
+        <path d="M33.338 6.544h26.038L33.979 79.786a4.152 4.152 0 01-3.933 2.82H8.172a4.145 4.145 0 01-3.928-5.47L26.393 9.368a4.152 4.152 0 013.928-2.825z" fill="url(#azure-a)" />
+        <path d="M71.175 60.261H29.111a1.911 1.911 0 00-1.305 3.309l27.069 25.265a4.177 4.177 0 002.852 1.121h23.864z" fill="#0078d4" />
+        <path d="M33.338 6.544a4.12 4.12 0 00-3.934 2.853L4.276 77.1a4.139 4.139 0 003.896 5.507h20.274a4.443 4.443 0 003.406-2.854l4.938-14.564 17.655 16.493a4.25 4.25 0 002.7.974h23.521l-10.308-29.48-30.08.007L46.16 6.544z" fill="url(#azure-b)" />
+        <path d="M69.924 9.367a4.147 4.147 0 00-3.927-2.823H33.6a4.148 4.148 0 013.928 2.823l22.166 67.74a4.146 4.146 0 01-3.928 5.469h32.393a4.146 4.146 0 003.928-5.469z" fill="url(#azure-c)" />
+      </svg>
+    ),
+    accent: '#0078d4',
+    gradient: 'linear-gradient(135deg, #0078d420 0%, #0078d408 100%)',
+    border: '#0078d440',
+    glowColor: 'rgba(0, 120, 212, 0.25)',
+  },
+  {
+    id: 'aws',
+    name: 'Amazon Web Services',
+    description: 'Comprehensive cloud from Amazon',
+    logo: (
+      <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" className={styles.platformLogo}>
+        <path d="M13.527 21.529c0 .528.057 1.055.228 1.526a8.66 8.66 0 00.584 1.241c.114.17.171.34.171.528 0 .227-.113.453-.34.68l-1.128.754c-.17.113-.34.17-.51.17-.227 0-.453-.113-.68-.34a7.063 7.063 0 01-.811-1.072 17.43 17.43 0 01-.697-1.356c-1.752 2.07-3.958 3.106-6.618 3.106-1.893 0-3.39-.548-4.518-1.64C.084 23.83-.5 22.399-.5 20.61c0-1.893.67-3.447 2.013-4.577 1.355-1.128 3.163-1.695 5.44-1.695.754 0 1.526.057 2.35.17.81.113 1.638.284 2.506.51v-1.583c0-1.64-.34-2.788-1.015-3.447-.68-.66-1.844-.981-3.504-.981-.754 0-1.526.113-2.28.284-.754.17-1.49.397-2.224.698a6.096 6.096 0 01-.754.283c-.114.057-.227.057-.284.057-.284 0-.397-.2-.397-.566v-.868c0-.284.057-.51.17-.624.114-.113.34-.283.68-.397a14.32 14.32 0 012.789-.868c1.015-.227 2.1-.34 3.22-.34 2.45 0 4.24.566 5.37 1.695 1.128 1.128 1.695 2.845 1.695 5.156v6.787h-.047zm-9.143 3.448c.754 0 1.526-.17 2.336-.51.811-.34 1.527-.98 2.127-1.847.34-.51.623-1.072.755-1.695.113-.623.17-1.356.17-2.24v-1.072c-.641-.17-1.298-.284-1.95-.397-.667-.113-1.298-.17-1.95-.17-1.413 0-2.449.284-3.147.868-.697.583-1.072 1.413-1.072 2.505 0 1.015.265 1.78.81 2.307.51.527 1.243.811 2.121.25zm16.987 2.28c-.34 0-.566-.057-.697-.17-.17-.113-.34-.397-.453-.754l-5.098-16.77c-.113-.397-.17-.624-.17-.754 0-.34.17-.51.51-.51h1.979c.34 0 .583.057.697.17.17.113.283.397.396.754l3.674 14.474 3.39-14.474c.113-.397.227-.64.397-.754.17-.113.396-.17.753-.17h1.584c.34 0 .583.057.754.17.17.113.34.397.396.754l3.447 14.644 3.73-14.644c.113-.397.283-.64.396-.754.17-.113.397-.17.697-.17h1.866c.34 0 .51.17.51.51 0 .113 0 .227-.056.34-.057.113-.113.34-.227.567l-5.213 16.77c-.113.397-.284.64-.453.754-.17.113-.396.17-.697.17h-1.752c-.34 0-.583-.057-.754-.17-.17-.114-.34-.397-.396-.754l-3.39-14.19-3.39 14.19c-.113.34-.227.623-.396.754-.17.113-.397.17-.754.17h-1.698zm27.76.566c-1.072 0-2.144-.113-3.163-.397-.98-.283-1.752-.566-2.28-.924-.284-.17-.454-.397-.51-.566a1.524 1.524 0 01-.114-.566v-.924c0-.34.17-.51.453-.51.114 0 .227 0 .34.057.113.057.284.113.453.17.623.283 1.298.51 2.013.67.754.17 1.47.227 2.24.227 1.185 0 2.1-.227 2.787-.68.697-.453 1.015-1.072 1.015-1.866 0-.566-.17-1.015-.51-1.413-.34-.34-.924-.68-1.752-.98l-2.562-.811c-1.298-.397-2.27-.98-2.845-1.808-.566-.81-.925-1.695-.925-2.675 0-.754.17-1.413.51-1.98.34-.567.81-1.072 1.355-1.47a5.916 5.916 0 011.98-.924c.754-.17 1.527-.284 2.337-.284.397 0 .81.057 1.185.114.396.057.754.17 1.072.227.34.113.623.17.924.283.284.113.51.227.68.34.227.17.397.34.51.51.113.17.17.34.17.566v.867c0 .34-.17.51-.453.51-.17 0-.397-.056-.68-.227-1.015-.453-2.127-.68-3.39-.68-1.072 0-1.9.17-2.505.51-.623.34-.924.924-.924 1.695 0 .566.17 1.072.51 1.413.34.397.924.68 1.808.98l2.505.81c1.298.397 2.25.981 2.845 1.752.566.754.868 1.64.868 2.619 0 .81-.17 1.527-.51 2.14-.34.624-.811 1.185-1.413 1.584-.566.453-1.298.754-2.1.98-.868.17-1.697.34-2.619.34z" fill="#252f3e" />
+        <path d="M43.12 32.944c-5.268 3.788-12.914 5.768-19.474 5.768-9.2 0-17.493-3.39-23.76-9.03-.51-.453-.057-1.072.567-.68C6.788 32.38 14.434 34.59 22.334 34.59c5.267 0 11.064-1.072 16.388-3.334.924-.34 1.695.623.397 1.688z" fill="#ff9900" />
+        <path d="M45.133 30.6c-.68-.867-4.463-.413-6.164-.21-.51.057-.566-.397-.17-.697 3.05-2.14 8.03-1.527 8.598-.81.567.754-.17 5.66-3.05 7.978-.453.34-.867.17-.697-.283.68-1.64 2.2-5.1 1.483-5.978z" fill="#ff9900" />
+      </svg>
+    ),
+    accent: '#ff9900',
+    gradient: 'linear-gradient(135deg, #ff990020 0%, #ff990008 100%)',
+    border: '#ff990040',
+    glowColor: 'rgba(255, 153, 0, 0.25)',
+  },
+  {
+    id: 'gcp',
+    name: 'Google Cloud',
+    description: 'Intelligent cloud from Google',
+    logo: (
+      <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" className={styles.platformLogo}>
+        <path d="M30.087 13.188l3.822-3.822.256-1.622C27.23 2.013 19.05.924 12.06 4.42 5.07 7.915.49 14.583.01 22.035l1.379-.193 7.644-1.26.592-.605c3.243-3.555 8.14-5.153 12.843-4.16l.015-.008 7.604-2.621z" fill="#EA4335" />
+        <path d="M37.95 21.868c-.859-3.168-2.692-6.003-5.256-8.083l-5.44 5.439c2.304 1.84 3.633 4.608 3.565 7.517v.946c2.616 0 4.737 2.12 4.737 4.737s-2.121 4.736-4.737 4.736H19.58l-.936.958v5.682l.936.93H30.82c6.795.056 12.415-5.372 12.471-12.167.033-3.968-1.878-7.71-5.04-10.164l-.303-.53z" fill="#4285F4" />
+        <path d="M8.358 43.73h11.222v-9.319H8.358a4.69 4.69 0 01-1.947-.424l-1.362.423-3.846 3.822-.334 1.379c1.962 2.568 5.02 4.116 8.49 4.116z" fill="#34A853" />
+        <path d="M8.358 18.37C1.563 18.413-3.88 24.04-3.837 30.835c.025 3.867 1.85 7.504 4.975 9.873l7.175-7.176a4.72 4.72 0 01-2.096-3.32 4.74 4.74 0 014.141-5.259 4.72 4.72 0 013.32 2.096l7.176-7.175c-2.483-3.211-6.29-5.06-10.497-5.003z" fill="#FBBC05" />
+      </svg>
+    ),
+    accent: '#4285f4',
+    gradient: 'linear-gradient(135deg, #4285f420 0%, #4285f408 100%)',
+    border: '#4285f440',
+    glowColor: 'rgba(66, 133, 244, 0.25)',
+  },
+];
 
-  useEffect(() => {
-    loadDashboard();
-    const interval = setInterval(loadDashboard, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  async function loadDashboard() {
-    try {
-      const [taskRes, approvalRes, healthRes] = await Promise.allSettled([
-        listTasks(1, 10),
-        listApprovals(),
-        checkHealth(),
-      ]);
-
-      if (taskRes.status === 'fulfilled') setTasks(taskRes.value.tasks);
-      if (approvalRes.status === 'fulfilled') setApprovals(approvalRes.value);
-      if (healthRes.status === 'fulfilled') setHealth(healthRes.value);
-      setError(null);
-    } catch (err) {
-      setError('Failed to load dashboard data');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="loading-page">
-        <div className="loading-spinner" />
-        Loading dashboard...
-      </div>
-    );
-  }
-
-  const activeTasks = tasks.filter(
-    (t) => !['COMPLETE', 'FAILED', 'CANCELLED', 'ARCHIVED'].includes(t.current_state)
-  );
-  const completedTasks = tasks.filter((t) => t.current_state === 'COMPLETE');
-  const failedTasks = tasks.filter((t) => t.current_state === 'FAILED');
-
+export default function LandingPage() {
   return (
-    <div className="page-container animate-in">
-      <div className="page-header">
-        <h1>Control Plane</h1>
-        <p>Autonomous AI Developer Agents Platform — real-time system overview</p>
+    <div className={styles.landingPage}>
+      <div className={styles.hero}>
+        <div className={styles.heroEyebrow}>AADAP — Autonomous AI Developer Agents Platform</div>
+        <h1 className={styles.heroTitle}>Select Your Cloud Platform</h1>
+        <p className={styles.heroSubtitle}>
+          Choose a cloud environment to access the control plane, manage tasks, and review approvals.
+        </p>
       </div>
 
-      {error && <div className="error-banner">⚠ {error}</div>}
-
-      {/* Stats Grid */}
-      <div className="grid-stats" style={{ marginBottom: 'var(--space-2xl)' }}>
-        <div className="card stat-card" style={{ '--stat-accent': 'var(--color-accent)' } as React.CSSProperties}>
-          <div className="stat-value">{tasks.length}</div>
-          <div className="stat-label">Total Tasks</div>
-        </div>
-        <div className="card stat-card" style={{ '--stat-accent': 'var(--color-warning)' } as React.CSSProperties}>
-          <div className="stat-value">{activeTasks.length}</div>
-          <div className="stat-label">Active</div>
-        </div>
-        <div className="card stat-card" style={{ '--stat-accent': 'var(--color-danger)' } as React.CSSProperties}>
-          <div className="stat-value">{approvals.length}</div>
-          <div className="stat-label">Pending Approvals</div>
-        </div>
-        <div className="card stat-card" style={{ '--stat-accent': health?.status === 'healthy' ? 'var(--color-success)' : 'var(--color-danger)' } as React.CSSProperties}>
-          <div className="stat-value" style={{ fontSize: 'var(--font-size-xl)' }}>
-            {health?.status === 'healthy' ? '● Healthy' : '○ Degraded'}
-          </div>
-          <div className="stat-label">System Health</div>
-        </div>
-      </div>
-
-      {/* Two-column layout */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-xl)' }}>
-        {/* Recent Tasks */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-lg">
-            <h2 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600 }}>Recent Tasks</h2>
-            <Link href="/tasks" className="btn btn-ghost btn-sm">View All →</Link>
-          </div>
-          {tasks.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-state-icon">📋</div>
-              <div className="empty-state-title">No tasks yet</div>
-              <div className="empty-state-description">Submit your first task to get started.</div>
-              <Link href="/tasks/new" className="btn btn-primary">Create Task</Link>
+      <div className={styles.cardsGrid}>
+        {PLATFORMS.map((platform) => (
+          <Link
+            key={platform.id}
+            href="/dashboard"
+            className={styles.platformCard}
+            style={{
+              '--card-gradient': platform.gradient,
+              '--card-border': platform.border,
+              '--card-accent': platform.accent,
+              '--card-glow': platform.glowColor,
+            } as React.CSSProperties}
+          >
+            <div className={styles.cardGlow} />
+            <div className={styles.logoWrapper}>{platform.logo}</div>
+            <div className={styles.platformName}>{platform.name}</div>
+            <div className={styles.platformDesc}>{platform.description}</div>
+            <div className={styles.cardArrow}>
+              <span>Enter Platform</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12h14M12 5l7 7-7 7" />
+              </svg>
             </div>
-          ) : (
-            <div className="flex flex-col gap-sm">
-              {tasks.slice(0, 5).map((task) => (
-                <Link
-                  key={task.id}
-                  href={`/tasks/${task.id}`}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: 'var(--space-md) var(--space-lg)',
-                    borderRadius: 'var(--radius-md)',
-                    background: 'var(--color-bg-tertiary)',
-                    transition: 'all var(--transition-fast)',
-                    textDecoration: 'none',
-                    color: 'var(--color-text-primary)',
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 500, fontSize: 'var(--font-size-base)' }}>{task.title}</div>
-                    <div className="text-xs text-secondary font-mono" style={{ marginTop: 2 }}>
-                      {task.id.slice(0, 8)}… · {formatTime(task.created_at)}
-                    </div>
-                  </div>
-                  <span
-                    className="badge"
-                    style={{
-                      background: `${STATE_COLORS[task.current_state] || '#6b7280'}20`,
-                      color: STATE_COLORS[task.current_state] || '#6b7280',
-                    }}
-                  >
-                    <span className="badge-dot" style={{ background: STATE_COLORS[task.current_state] || '#6b7280' }} />
-                    {STATE_LABELS[task.current_state] || task.current_state}
-                  </span>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Pending Approvals */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-lg">
-            <h2 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600 }}>Pending Approvals</h2>
-            <Link href="/approvals" className="btn btn-ghost btn-sm">View All →</Link>
-          </div>
-          {approvals.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-state-icon">✅</div>
-              <div className="empty-state-title">All clear</div>
-              <div className="empty-state-description">No pending approvals require your attention.</div>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-sm">
-              {approvals.slice(0, 5).map((approval) => (
-                <Link
-                  key={approval.id}
-                  href={`/approvals/${approval.id}`}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: 'var(--space-md) var(--space-lg)',
-                    borderRadius: 'var(--radius-md)',
-                    background: 'var(--color-danger-muted)',
-                    border: '1px solid rgba(239, 68, 68, 0.2)',
-                    transition: 'all var(--transition-fast)',
-                    textDecoration: 'none',
-                    color: 'var(--color-text-primary)',
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 500, fontSize: 'var(--font-size-base)' }}>
-                      {approval.operation_type} — {approval.environment}
-                    </div>
-                    <div className="text-xs text-secondary">
-                      Requested by {approval.requested_by}
-                    </div>
-                  </div>
-                  <span className="badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' }}>
-                    <span className="badge-dot" style={{ background: '#f59e0b' }} />
-                    Pending
-                  </span>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
+          </Link>
+        ))}
       </div>
     </div>
   );
-}
-
-function formatTime(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString('en-US', {
-      month: 'short', day: 'numeric',
-      hour: '2-digit', minute: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
 }
