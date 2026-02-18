@@ -37,6 +37,40 @@ logger = get_logger(__name__)
 MAX_SELF_CORRECTIONS = 3  # INV-03
 DEFAULT_MODEL = "gpt-4o"
 
+# ── Platform-specific optimization patterns ────────────────────────────
+
+_DATABRICKS_PATTERNS: list[str] = [
+    "Use Delta Lake OPTIMIZE + ZORDER for read-heavy tables.",
+    "Enable Photon acceleration where available (photon_enabled=true).",
+    "Leverage Adaptive Query Execution (AQE) — avoid manual repartition when AQE is on.",
+    "Prefer Delta MERGE over delete-insert for upserts.",
+    "Use predictive I/O and liquid clustering for large tables.",
+    "Broadcast small dimension tables (<= 10 MB) explicitly.",
+]
+
+_FABRIC_PATTERNS: list[str] = [
+    "Apply V-Order on write for faster downstream reads (spark.conf.set('spark.sql.parquet.vorder.enabled', 'true')).",
+    "Use Z-Order on high-cardinality filter columns.",
+    "Leverage OneLake caching for repeatedly accessed tables.",
+    "Use optimized Delta writes (optimizeWrite, autoCompaction).",
+    "Prefer Fabric-native connectors over generic Spark connectors.",
+    "Avoid excessive small files — enable autoCompaction.",
+]
+
+
+def _platform_hints(platform: str) -> str:
+    """Return platform-specific optimization hints for prompt augmentation."""
+    if platform.lower() in {"databricks", "azure databricks", "adb"}:
+        label = "Azure Databricks"
+        patterns = _DATABRICKS_PATTERNS
+    elif platform.lower() in {"fabric", "microsoft fabric"}:
+        label = "Microsoft Fabric"
+        patterns = _FABRIC_PATTERNS
+    else:
+        return ""
+    numbered = "\n".join(f"  {i}. {p}" for i, p in enumerate(patterns, 1))
+    return f"\n\nPlatform-specific patterns ({label}):\n{numbered}"
+
 
 # ── OptimizationAgent ─────────────────────────────────────────────────
 
@@ -69,13 +103,23 @@ class OptimizationAgent(BaseAgent):
         """
         Optimize PySpark code for performance.
 
+        Injects platform-specific optimization patterns (Databricks:
+        Delta Lake / Photon / AQE; Fabric: V-Order / Z-Order / OneLake)
+        into the prompt context.
+
         Self-corrects up to MAX_SELF_CORRECTIONS on schema failures.
         Escalates on token exhaustion or persistent failures.
         """
         task_data = context.task_data
+        platform = task_data.get("platform", "")
+        extra_context = task_data.get("context", "None")
+        hints = _platform_hints(platform)
+        if hints:
+            extra_context = f"{extra_context}{hints}"
+
         prompt = OPTIMIZATION_OPTIMIZE_PROMPT.render({
             "code": task_data.get("code", ""),
-            "context": task_data.get("context", "None"),
+            "context": extra_context,
             "environment": task_data.get("environment", "SANDBOX"),
         })
 
@@ -109,6 +153,7 @@ class OptimizationAgent(BaseAgent):
                 )
 
             # Track tokens (INV-04)
+            assert self._token_tracker is not None  # set by accept_task
             try:
                 self._token_tracker.consume(response.tokens_used)
             except TokenBudgetExhaustedError:

@@ -18,7 +18,11 @@ import uuid
 import pytest
 
 from aadap.agents.base import AgentContext, AgentState
-from aadap.agents.optimization_agent import MAX_SELF_CORRECTIONS, OptimizationAgent
+from aadap.agents.optimization_agent import (
+    MAX_SELF_CORRECTIONS,
+    OptimizationAgent,
+    _platform_hints,
+)
 from aadap.integrations.llm_client import LLMResponse, MockLLMClient
 
 
@@ -173,3 +177,74 @@ class TestOptimizationAgentTokenBudget:
 
         assert result.success is False
         assert "Token budget exhausted" in result.error or "ESCALATE" in result.error
+
+
+# ── Phase 7: Platform-Specific Optimization Tests ──────────────────────
+
+
+class TestOptimizationPlatformHints:
+    """Phase 7: platform-specific optimization patterns."""
+
+    def test_databricks_hints_returned(self):
+        hints = _platform_hints("databricks")
+        assert "Azure Databricks" in hints
+        assert "Photon" in hints
+        assert "AQE" in hints
+        assert "Delta Lake" in hints or "OPTIMIZE" in hints
+
+    def test_fabric_hints_returned(self):
+        hints = _platform_hints("fabric")
+        assert "Microsoft Fabric" in hints
+        assert "V-Order" in hints
+        assert "Z-Order" in hints
+
+    def test_unknown_platform_returns_empty(self):
+        assert _platform_hints("unknown") == ""
+
+    def test_case_insensitive(self):
+        assert "Azure Databricks" in _platform_hints("Azure Databricks")
+        assert "Microsoft Fabric" in _platform_hints("Microsoft Fabric")
+
+    async def test_databricks_hints_injected_into_prompt(self):
+        """With platform=databricks the LLM prompt should include patterns."""
+        captured_prompts: list[str] = []
+
+        class CapturingLLM(MockLLMClient):
+            async def complete(self, prompt, model=None, max_tokens=4096):
+                captured_prompts.append(prompt)
+                return await super().complete(prompt, model, max_tokens)
+
+        llm = CapturingLLM(default_response=_valid_optimization())
+        agent = OptimizationAgent(agent_id="opt-p7-1", llm_client=llm)
+        ctx = _make_context(
+            task_data={
+                "code": "df.show()",
+                "context": "test",
+                "environment": "SANDBOX",
+                "platform": "databricks",
+            },
+        )
+
+        await agent.accept_task(ctx)
+        await agent.execute(ctx)
+
+        assert len(captured_prompts) == 1
+        assert "Photon" in captured_prompts[0]
+
+    async def test_no_platform_omits_extra_hints(self):
+        captured_prompts: list[str] = []
+
+        class CapturingLLM(MockLLMClient):
+            async def complete(self, prompt, model=None, max_tokens=4096):
+                captured_prompts.append(prompt)
+                return await super().complete(prompt, model, max_tokens)
+
+        llm = CapturingLLM(default_response=_valid_optimization())
+        agent = OptimizationAgent(agent_id="opt-p7-2", llm_client=llm)
+        ctx = _make_context()  # no platform key
+
+        await agent.accept_task(ctx)
+        await agent.execute(ctx)
+
+        assert "Photon" not in captured_prompts[0]
+        assert "V-Order" not in captured_prompts[0]

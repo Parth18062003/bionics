@@ -36,6 +36,8 @@ from aadap.agents.prompts.validation import (
 from aadap.agents.token_tracker import TokenBudgetExhaustedError
 from aadap.core.logging import get_logger
 from aadap.integrations.llm_client import BaseLLMClient
+from aadap.safety.semantic_analysis import PipelineResult, SafetyPipeline
+from aadap.safety.static_analysis import RiskLevel
 
 logger = get_logger(__name__)
 
@@ -62,6 +64,7 @@ class ValidationAgent(BaseAgent):
         agent_id: str,
         llm_client: BaseLLMClient,
         model: str = DEFAULT_MODEL,
+        safety_pipeline: SafetyPipeline | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -71,18 +74,125 @@ class ValidationAgent(BaseAgent):
         )
         self._llm_client = llm_client
         self._model = model
+        self._safety_pipeline = safety_pipeline or SafetyPipeline()
+
+    # ── Deterministic safety evaluation ─────────────────────────────────
+
+    def _run_safety_pipeline(
+        self, code: str, language: str,
+    ) -> dict[str, Any]:
+        """Run the deterministic 3-gate safety pipeline (Gates 1-3).
+
+        Returns a dict with 'risk_level', 'requires_approval',
+        'findings', and 'summary'.
+        """
+        result: PipelineResult = self._safety_pipeline.evaluate(
+            code, language,
+        )
+        findings_list = [
+            {
+                "line": f.line,
+                "pattern": f.pattern,
+                "description": f.description,
+                "severity": f.severity.value,
+            }
+            for f in result.all_findings
+        ]
+        return {
+            "risk_level": result.overall_risk.value,
+            "requires_approval": result.requires_approval,
+            "passed": result.passed,
+            "findings": findings_list,
+            "summary": result.summary,
+        }
+
+    @staticmethod
+    def _merge_results(
+        deterministic: dict[str, Any],
+        llm_report: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Merge deterministic safety-pipeline output with LLM report.
+
+        The deterministic risk level is authoritative —
+        if it is higher than the LLM's risk_score the merged result
+        inherits the stricter outcome.
+        """
+        merged = {**llm_report}
+
+        # Combine issues
+        combined_issues = list(llm_report.get("issues", []))
+        for finding in deterministic.get("findings", []):
+            combined_issues.append({
+                "severity": finding.get("severity", "info").lower(),
+                "description": (
+                    f"[static] {finding.get('description', '')}"
+                ),
+            })
+        merged["issues"] = combined_issues
+
+        # Map deterministic risk_level to 0-1 float for comparison
+        _RISK_FLOAT: dict[str, float] = {
+            "NONE": 0.0,
+            "LOW": 0.25,
+            "MEDIUM": 0.5,
+            "HIGH": 0.75,
+            "CRITICAL": 1.0,
+        }
+        det_score = _RISK_FLOAT.get(
+            deterministic.get("risk_level", "NONE"), 0.0,
+        )
+        llm_score = float(llm_report.get("risk_score", 0.0))
+        merged["risk_score"] = max(det_score, llm_score)
+
+        # Attach pipeline summary
+        merged["safety_pipeline"] = deterministic
+
+        # Override is_valid if deterministic pipeline didn't pass
+        if not deterministic.get("passed", True):
+            merged["is_valid"] = False
+
+        # Override recommendation to reject if CRITICAL
+        if deterministic.get("risk_level") == "CRITICAL":
+            merged["recommendation"] = "reject"
+        elif (
+            deterministic.get("requires_approval")
+            and merged.get("recommendation") == "approve"
+        ):
+            merged["recommendation"] = "revise"
+
+        return merged
 
     async def _do_execute(self, context: AgentContext) -> AgentResult:
         """
         Validate code and produce a structured safety report.
 
+        Phase 1: Run deterministic SafetyPipeline (Gates 1-3).
+        Phase 2: Run LLM semantic review with self-correction.
+        Phase 3: Merge deterministic + LLM results.
+
         Self-corrects up to MAX_SELF_CORRECTIONS on schema failures.
         Escalates on token exhaustion or persistent failures.
         """
         task_data = context.task_data
+        code = task_data.get("code", "")
+        language = task_data.get("language", "python")
+
+        # ── Phase 1: Deterministic safety evaluation ────────────────────
+        deterministic_result = self._run_safety_pipeline(code, language)
+
+        logger.info(
+            "validation.deterministic_complete",
+            agent_id=self._agent_id,
+            task_id=str(context.task_id),
+            risk_level=deterministic_result["risk_level"],
+            requires_approval=deterministic_result["requires_approval"],
+            findings_count=len(deterministic_result["findings"]),
+        )
+
+        # ── Phase 2: LLM semantic review ────────────────────────────────
         prompt = VALIDATION_REVIEW_PROMPT.render({
-            "code": task_data.get("code", ""),
-            "language": task_data.get("language", "python"),
+            "code": code,
+            "language": language,
             "task_description": task_data.get("description", ""),
             "environment": task_data.get("environment", "SANDBOX"),
         })
@@ -163,22 +273,28 @@ class ValidationAgent(BaseAgent):
                         raw_output=response.content,
                     )
 
+                # ── Phase 3: Merge deterministic + LLM ──────────────
+                merged = self._merge_results(
+                    deterministic_result, result,
+                )
+
                 logger.info(
                     "validation.success",
                     agent_id=self._agent_id,
                     task_id=str(context.task_id),
                     attempt=attempt,
                     tokens_used=total_tokens,
-                    is_valid=result.get("is_valid"),
-                    risk_score=risk_score,
+                    is_valid=merged.get("is_valid"),
+                    risk_score=merged.get("risk_score"),
+                    deterministic_risk=deterministic_result["risk_level"],
                 )
                 return AgentResult(
                     success=True,
-                    output=result,
+                    output=merged,
                     tokens_used=total_tokens,
                     artifacts=[{
                         "type": "validation_report",
-                        "content": result,
+                        "content": merged,
                     }],
                 )
             except OutputSchemaViolation as e:

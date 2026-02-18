@@ -7,6 +7,15 @@ import type { AgentCatalogEntry } from '@/api/types';
 import { ErrorBanner, LoadingPage, PageHeader } from '@/components/ui';
 import { clamp } from '@/lib/utils';
 
+/** Derive the capability category from the marketplace agent ID. */
+function agentCapability(id: string): 'ingestion' | 'pipeline' | 'scheduler' | 'catalog' | null {
+  if (id.startsWith('ingestion')) return 'ingestion';
+  if (id.startsWith('pipeline'))  return 'pipeline';
+  if (id.startsWith('scheduler')) return 'scheduler';
+  if (id.startsWith('catalog'))   return 'catalog';
+  return null;
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    Inner form — uses useSearchParams, so it must live inside <Suspense>.
    ───────────────────────────────────────────────────────────────────────── */
@@ -27,6 +36,15 @@ function NewTaskForm() {
   const [agent, setAgent]               = useState<AgentCatalogEntry | null>(null);
   const [agentLoading, setAgentLoading] = useState(!!agentParam);
 
+  // ── Capability-specific config ──
+  const [sourceType, setSourceType]         = useState('adls');
+  const [targetType, setTargetType]         = useState('delta_lake');
+  const [ingestionMode, setIngestionMode]   = useState<'batch' | 'streaming' | 'cdc'>('batch');
+  const [pipelineType, setPipelineType]     = useState<'dlt' | 'datafactory' | 'workflow'>('dlt');
+  const [jobType, setJobType]               = useState<'notebook' | 'spark' | 'pipeline'>('notebook');
+  const [cronExpression, setCronExpression] = useState('');
+  const [scheduleTz, setScheduleTz]         = useState('UTC');
+
   useEffect(() => {
     if (!agentParam) return;
     getMarketplaceAgent(agentParam)
@@ -46,9 +64,26 @@ function NewTaskForm() {
     setError(null);
 
     try {
+      // Build an enhanced description that embeds capability config as a
+      // structured JSON block so the assigned agent can consume it.
+      const cap = agent ? agentCapability(agent.id) : null;
+      let enhancedDescription = description.trim();
+
+      if (cap === 'ingestion') {
+        const cfg = { source_type: sourceType, target_type: targetType, ingestion_mode: ingestionMode };
+        enhancedDescription += `\n\n### Ingestion Configuration\n\`\`\`json\n${JSON.stringify(cfg, null, 2)}\n\`\`\``;
+      } else if (cap === 'pipeline') {
+        const cfg = { pipeline_type: pipelineType };
+        enhancedDescription += `\n\n### Pipeline Configuration\n\`\`\`json\n${JSON.stringify(cfg, null, 2)}\n\`\`\``;
+      } else if (cap === 'scheduler') {
+        const cfg: Record<string, unknown> = { job_type: jobType };
+        if (cronExpression.trim()) cfg.schedule = { cron_expression: cronExpression.trim(), timezone: scheduleTz };
+        enhancedDescription += `\n\n### Job Configuration\n\`\`\`json\n${JSON.stringify(cfg, null, 2)}\n\`\`\``;
+      }
+
       const task = await createTask({
         title:        title.trim(),
-        description:  description.trim() || undefined,
+        description:  enhancedDescription || undefined,
         priority,
         environment,
         agent_type:   agent?.id,
@@ -238,6 +273,131 @@ function NewTaskForm() {
               </select>
               <div className="text-xs text-secondary mt-xs">
                 Target language for code generation on {agent.platform}.
+              </div>
+            </div>
+          )}
+
+          {/* ── Capability-specific fields ── */}
+          {agent && agentCapability(agent.id) === 'ingestion' && (
+            <div
+              className="card"
+              style={{ padding: 'var(--space-lg)', borderLeft: '3px solid var(--color-accent)' }}
+            >
+              <div className="font-semibold mb-md" style={{ fontSize: 'var(--font-size-sm)' }}>
+                📥 Ingestion Configuration
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-xl)' }}>
+                <div className="form-group">
+                  <label htmlFor="cap-source-type" className="form-label">Source Type</label>
+                  <input
+                    id="cap-source-type"
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. adls, sql_server, kafka"
+                    value={sourceType}
+                    onChange={(e) => setSourceType(e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="cap-target-type" className="form-label">Target Type</label>
+                  <input
+                    id="cap-target-type"
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. delta_lake, lakehouse"
+                    value={targetType}
+                    onChange={(e) => setTargetType(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="form-group mt-lg">
+                <label htmlFor="cap-ingestion-mode" className="form-label">Ingestion Mode</label>
+                <select
+                  id="cap-ingestion-mode"
+                  className="form-select"
+                  value={ingestionMode}
+                  onChange={(e) => setIngestionMode(e.target.value as 'batch' | 'streaming' | 'cdc')}
+                >
+                  <option value="batch">Batch</option>
+                  <option value="streaming">Streaming</option>
+                  <option value="cdc">Change Data Capture (CDC)</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          {agent && agentCapability(agent.id) === 'pipeline' && (
+            <div
+              className="card"
+              style={{ padding: 'var(--space-lg)', borderLeft: '3px solid var(--color-accent)' }}
+            >
+              <div className="font-semibold mb-md" style={{ fontSize: 'var(--font-size-sm)' }}>
+                🔀 Pipeline Configuration
+              </div>
+              <div className="form-group">
+                <label htmlFor="cap-pipeline-type" className="form-label">Pipeline Type</label>
+                <select
+                  id="cap-pipeline-type"
+                  className="form-select"
+                  value={pipelineType}
+                  onChange={(e) => setPipelineType(e.target.value as 'dlt' | 'datafactory' | 'workflow')}
+                >
+                  <option value="dlt">Delta Live Tables (DLT)</option>
+                  <option value="datafactory">Azure Data Factory</option>
+                  <option value="workflow">Databricks Workflow</option>
+                </select>
+                <div className="text-xs text-secondary mt-xs">
+                  Target pipeline framework for the generated ETL definition.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {agent && agentCapability(agent.id) === 'scheduler' && (
+            <div
+              className="card"
+              style={{ padding: 'var(--space-lg)', borderLeft: '3px solid var(--color-accent)' }}
+            >
+              <div className="font-semibold mb-md" style={{ fontSize: 'var(--font-size-sm)' }}>
+                ⏱ Job Configuration
+              </div>
+              <div className="form-group">
+                <label htmlFor="cap-job-type" className="form-label">Job Type</label>
+                <select
+                  id="cap-job-type"
+                  className="form-select"
+                  value={jobType}
+                  onChange={(e) => setJobType(e.target.value as 'notebook' | 'spark' | 'pipeline')}
+                >
+                  <option value="notebook">Notebook</option>
+                  <option value="spark">Spark Submit</option>
+                  <option value="pipeline">Pipeline</option>
+                </select>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-xl)' }} className="mt-lg">
+                <div className="form-group">
+                  <label htmlFor="cap-cron" className="form-label">Cron Expression (optional)</label>
+                  <input
+                    id="cap-cron"
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. 0 2 * * *"
+                    value={cronExpression}
+                    onChange={(e) => setCronExpression(e.target.value)}
+                  />
+                  <div className="text-xs text-secondary mt-xs">Leave blank for on-demand jobs.</div>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="cap-tz" className="form-label">Timezone</label>
+                  <input
+                    id="cap-tz"
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. UTC, America/New_York"
+                    value={scheduleTz}
+                    onChange={(e) => setScheduleTz(e.target.value)}
+                  />
+                </div>
               </div>
             </div>
           )}

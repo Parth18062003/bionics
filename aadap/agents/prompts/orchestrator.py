@@ -13,7 +13,11 @@ from aadap.agents.prompts.base import PromptTemplate, StructuredOutput
 
 ORCHESTRATOR_DECISION_SCHEMA = StructuredOutput(
     fields={
-        "agent_assignment": "str — agent type to handle task (developer|validation|optimization)",
+        "agent_assignment": (
+            "str — agent type to handle task "
+            "(developer|validation|optimization|ingestion|etl_pipeline|"
+            "job_scheduler|catalog)"
+        ),
         "sub_tasks": "list[dict] — decomposed sub-tasks with descriptions",
         "priority": "int — priority 0 (lowest) to 10 (highest)",
         "reasoning": "str — explanation of the routing decision",
@@ -33,7 +37,13 @@ ORCHESTRATOR_DECISION_PROMPT = PromptTemplate(
         "no agent may execute without your assignment."
     ),
     constraints=[
-        "You MUST assign tasks only to known agent types: developer, validation, optimization.",
+        "You MUST assign tasks only to known agent types: "
+        "developer, validation, optimization, ingestion, etl_pipeline, "
+        "job_scheduler, catalog.",
+        "Use 'ingestion' for data loading / streaming / CDC tasks.",
+        "Use 'etl_pipeline' for DLT, Data Factory, or transformation tasks.",
+        "Use 'job_scheduler' for scheduling, triggering, and DAG tasks.",
+        "Use 'catalog' for schema design, permissions, and governance.",
         "You MUST NOT self-assign or execute tasks directly.",
         "You MUST decompose complex tasks into discrete sub-tasks.",
         "Each sub-task MUST have a clear description and expected output.",

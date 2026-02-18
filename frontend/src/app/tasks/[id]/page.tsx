@@ -16,6 +16,17 @@ import {
 } from '@/components/ui';
 import { formatTimeWithSeconds } from '@/lib/utils';
 
+/** Maps artifact_type → display icon + label colour for the artifacts list. */
+const ARTIFACT_DISPLAY: Record<string, { icon: string; color: string }> = {
+  pipeline_definition:  { icon: '🔀', color: '#a78bfa' },
+  job_config:           { icon: '⏱', color: '#fb923c' },
+  ingestion_config:     { icon: '📥', color: '#22d3ee' },
+  optimized_code:       { icon: '✨', color: '#10b981' },
+  optimization_report:  { icon: '📊', color: '#34d399' },
+  source_code:          { icon: '💻', color: '#818cf8' },
+  validation_report:    { icon: '🛡️', color: '#f59e0b' },
+};
+
 export default function TaskDetailPage() {
   const params = useParams();
   const taskId = params.id as string;
@@ -417,33 +428,43 @@ export default function TaskDetailPage() {
             <p className="text-sm text-secondary">No artifacts generated yet.</p>
           ) : (
             <div className="flex flex-col gap-sm" role="list" aria-label="Task artifacts">
-              {artifacts.map((artifact) => (
-                <Link
-                  key={artifact.id}
-                  href={`/artifacts/${taskId}/${artifact.id}`}
-                  role="listitem"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: 'var(--space-md) var(--space-lg)',
-                    borderRadius: 'var(--radius-md)',
-                    background: 'var(--color-bg-tertiary)',
-                    textDecoration: 'none',
-                    color: 'var(--color-text-primary)',
-                    transition: 'all var(--transition-fast)',
-                    gap: 'var(--space-md)',
-                  }}
-                >
-                  <div style={{ minWidth: 0 }}>
-                    <div className="font-medium truncate">{artifact.name}</div>
-                    <div className="text-xs text-secondary mt-xs">
-                      {artifact.artifact_type} · {formatTimeWithSeconds(artifact.created_at)}
+              {artifacts.map((artifact) => {
+                const display = ARTIFACT_DISPLAY[artifact.artifact_type];
+                return (
+                  <Link
+                    key={artifact.id}
+                    href={`/artifacts/${taskId}/${artifact.id}`}
+                    role="listitem"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: 'var(--space-md) var(--space-lg)',
+                      borderRadius: 'var(--radius-md)',
+                      background: 'var(--color-bg-tertiary)',
+                      textDecoration: 'none',
+                      color: 'var(--color-text-primary)',
+                      transition: 'all var(--transition-fast)',
+                      gap: 'var(--space-md)',
+                    }}
+                  >
+                    <div className="flex items-center gap-md" style={{ minWidth: 0 }}>
+                      {display && (
+                        <span style={{ fontSize: '1rem', flexShrink: 0 }} aria-hidden="true">
+                          {display.icon}
+                        </span>
+                      )}
+                      <div style={{ minWidth: 0 }}>
+                        <div className="font-medium truncate">{artifact.name}</div>
+                        <div className="text-xs mt-xs" style={{ color: display?.color ?? 'var(--color-text-secondary)' }}>
+                          {artifact.artifact_type} · {formatTimeWithSeconds(artifact.created_at)}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  <span className="text-sm text-secondary" aria-hidden="true">→</span>
-                </Link>
-              ))}
+                    <span className="text-sm text-secondary" aria-hidden="true">→</span>
+                  </Link>
+                );
+              })}
             </div>
           )}
         </section>

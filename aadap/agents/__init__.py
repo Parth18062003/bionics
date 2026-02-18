@@ -17,8 +17,20 @@ from aadap.agents.base import (
     AgentState,
     BaseAgent,
 )
+from aadap.agents.adapters import (
+    DatabricksAdapter,
+    FabricAdapter,
+    PlatformAdapter,
+    PlatformAdapterError,
+    PlatformCapabilityError,
+    PlatformExecutionError,
+)
+from aadap.agents.catalog_agent import CatalogAgent
 from aadap.agents.developer_agent import DeveloperAgent
+from aadap.agents.etl_pipeline_agent import ETLPipelineAgent
 from aadap.agents.fabric_agent import FabricAgent
+from aadap.agents.ingestion_agent import IngestionAgent
+from aadap.agents.job_scheduler_agent import JobSchedulerAgent
 from aadap.agents.factory import (
     create_developer_agent,
     create_fabric_agent,
@@ -52,11 +64,21 @@ __all__ = [
     "AgentResult",
     "AgentState",
     "BaseAgent",
+    "CatalogAgent",
+    "DatabricksAdapter",
     "DEFAULT_TOKEN_BUDGET",
     "DeveloperAgent",
+    "ETLPipelineAgent",
     "FabricAgent",
+    "FabricAdapter",
+    "IngestionAgent",
+    "JobSchedulerAgent",
     "HealthStatus",
     "NoAvailableAgentError",
+    "PlatformAdapter",
+    "PlatformAdapterError",
+    "PlatformCapabilityError",
+    "PlatformExecutionError",
     "PoolCapacityError",
     "TokenBudgetExhaustedError",
     "TokenTracker",

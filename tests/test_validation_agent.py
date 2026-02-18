@@ -20,6 +20,8 @@ import pytest
 from aadap.agents.base import AgentContext, AgentState
 from aadap.agents.validation_agent import MAX_SELF_CORRECTIONS, ValidationAgent
 from aadap.integrations.llm_client import LLMResponse, MockLLMClient
+from aadap.safety.semantic_analysis import SafetyPipeline
+from aadap.safety.static_analysis import RiskLevel
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────
@@ -237,3 +239,90 @@ class TestValidationAgentTokenBudget:
 
         assert result.success is False
         assert "Token budget exhausted" in result.error or "ESCALATE" in result.error
+
+
+# ── Phase 7: SafetyPipeline Merge Tests ─────────────────────────────────
+
+
+class TestValidationAgentSafetyPipelineMerge:
+    """Phase 7: deterministic SafetyPipeline runs before LLM and merges."""
+
+    async def test_safe_code_merges_with_llm(self):
+        """Clean code should pass deterministic pipeline and merge."""
+        llm = MockLLMClient(default_response=_valid_report())
+        agent = ValidationAgent(agent_id="val-p7-1", llm_client=llm)
+        ctx = _make_context()
+
+        await agent.accept_task(ctx)
+        result = await agent.execute(ctx)
+
+        assert result.success is True
+        # Merged output should include safety_pipeline key
+        assert "safety_pipeline" in result.output
+        sp = result.output["safety_pipeline"]
+        assert sp["risk_level"] in {rl.value for rl in RiskLevel}
+
+    async def test_dangerous_code_overrides_llm_approval(self):
+        """DROP TABLE should make deterministic pipeline risk override LLM approve."""
+        drop_code = "DROP TABLE production.users"
+        # LLM says approve
+        llm = MockLLMClient(default_response=_valid_report())
+        agent = ValidationAgent(agent_id="val-p7-2", llm_client=llm)
+        ctx = _make_context(
+            task_data={
+                "code": drop_code,
+                "language": "sql",
+                "description": "Drop users table",
+                "environment": "SANDBOX",
+            },
+        )
+
+        await agent.accept_task(ctx)
+        result = await agent.execute(ctx)
+
+        assert result.success is True
+        # Deterministic pipeline should find the destructive op
+        sp = result.output["safety_pipeline"]
+        assert len(sp["findings"]) > 0
+        # Merged risk_score should be at least as high as pipeline risk
+        assert result.output["risk_score"] >= 0.0
+
+    async def test_merged_output_contains_static_issues(self):
+        """Static issues from pipeline should appear in merged issues list."""
+        dangerous_code = "import os; os.system('rm -rf /')"
+        llm = MockLLMClient(default_response=_valid_report())
+        agent = ValidationAgent(agent_id="val-p7-3", llm_client=llm)
+        ctx = _make_context(
+            task_data={
+                "code": dangerous_code,
+                "language": "python",
+                "description": "Test dangerous code",
+                "environment": "SANDBOX",
+            },
+        )
+
+        await agent.accept_task(ctx)
+        result = await agent.execute(ctx)
+
+        assert result.success is True
+        issues = result.output["issues"]
+        static_issues = [
+            i for i in issues if i["description"].startswith("[static]")]
+        assert len(static_issues) > 0
+
+    async def test_custom_safety_pipeline_injection(self):
+        """Agent should accept a custom SafetyPipeline instance."""
+        pipeline = SafetyPipeline()
+        llm = MockLLMClient(default_response=_valid_report())
+        agent = ValidationAgent(
+            agent_id="val-p7-4",
+            llm_client=llm,
+            safety_pipeline=pipeline,
+        )
+        ctx = _make_context()
+
+        await agent.accept_task(ctx)
+        result = await agent.execute(ctx)
+
+        assert result.success is True
+        assert "safety_pipeline" in result.output

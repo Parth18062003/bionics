@@ -1,0 +1,237 @@
+"""
+AADAP — Databricks Platform Adapter
+===================================
+Adapter implementation for Databricks capability operations.
+
+The adapter wraps ``BaseDatabricksClient`` and only delegates through
+integration-client methods. Unsupported capabilities are handled with
+additive in-memory metadata fallbacks until explicit client support exists.
+"""
+
+from __future__ import annotations
+
+import uuid
+from typing import Any
+
+from aadap.agents.adapters.base import (
+    PlatformAdapter,
+    PlatformExecutionError,
+)
+from aadap.core.logging import get_logger
+from aadap.integrations.databricks_client import BaseDatabricksClient
+
+logger = get_logger(__name__)
+
+
+class DatabricksAdapter(PlatformAdapter):
+    """Platform adapter for Databricks operations."""
+
+    def __init__(
+        self,
+        client: BaseDatabricksClient,
+        default_environment: str = "SANDBOX",
+    ) -> None:
+        super().__init__(platform_name="databricks")
+        self._client = client
+        self._default_environment = default_environment
+        self._job_definitions: dict[str, dict[str, Any]] = {}
+        self._pipeline_definitions: dict[str, dict[str, Any]] = {}
+        self._table_definitions: dict[str, dict[str, Any]] = {}
+        self._shortcut_definitions: dict[str, dict[str, Any]] = {}
+
+    async def create_pipeline(self, definition: dict[str, Any]) -> str:
+        """Create a Databricks pipeline metadata record."""
+        pipeline_id = f"dbx-pipeline-{uuid.uuid4().hex[:12]}"
+        self._pipeline_definitions[pipeline_id] = dict(definition)
+        logger.info(
+            "databricks_adapter.pipeline_created",
+            pipeline_id=pipeline_id,
+            definition_keys=sorted(definition.keys()),
+        )
+        return pipeline_id
+
+    async def execute_pipeline(self, pipeline_id: str) -> dict[str, Any]:
+        """Execute a Databricks pipeline if known by this adapter."""
+        definition = self._pipeline_definitions.get(pipeline_id)
+        if definition is None:
+            raise PlatformExecutionError(
+                f"Databricks pipeline '{pipeline_id}' is not registered."
+            )
+
+        logger.info(
+            "databricks_adapter.pipeline_execute_requested",
+            pipeline_id=pipeline_id,
+        )
+
+        return {
+            "pipeline_id": pipeline_id,
+            "status": "QUEUED",
+            "platform": "databricks",
+            "definition": definition,
+        }
+
+    async def create_job(self, definition: dict[str, Any]) -> str:
+        """Create a Databricks job definition within adapter metadata."""
+        job_id = f"dbx-job-{uuid.uuid4().hex[:12]}"
+        self._job_definitions[job_id] = dict(definition)
+        logger.info(
+            "databricks_adapter.job_created",
+            job_id=job_id,
+            definition_keys=sorted(definition.keys()),
+        )
+        return job_id
+
+    async def execute_job(
+        self,
+        job_id: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Execute a Databricks job through the wrapped Databricks client."""
+        merged_params = params or {}
+        definition = self._job_definitions.get(job_id, {})
+
+        code = str(merged_params.get("code") or definition.get("code") or "")
+        if not code.strip():
+            raise PlatformExecutionError(
+                f"Databricks job '{job_id}' does not contain executable code."
+            )
+
+        language = str(merged_params.get("language")
+                       or definition.get("language") or "sql")
+        environment = str(
+            merged_params.get("environment")
+            or definition.get("environment")
+            or self._default_environment
+        )
+        task_id = self._coerce_task_id(merged_params.get("task_id"))
+
+        try:
+            submission = await self._client.submit_job(
+                task_id=task_id,
+                code=code,
+                environment=environment,
+                correlation_id=merged_params.get("correlation_id"),
+                language=language,
+            )
+            logger.info(
+                "databricks_adapter.job_submitted",
+                adapter_job_id=job_id,
+                execution_job_id=submission.job_id,
+                environment=environment,
+                language=language,
+            )
+            return {
+                "job_id": submission.job_id,
+                "adapter_job_id": job_id,
+                "status": submission.status.value,
+                "environment": submission.environment,
+                "platform": "databricks",
+            }
+        except Exception as exc:
+            logger.error(
+                "databricks_adapter.job_execution_failed",
+                adapter_job_id=job_id,
+                error=str(exc),
+            )
+            raise PlatformExecutionError(
+                f"Databricks job execution failed: {exc}"
+            ) from exc
+
+    async def get_job_status(self, job_id: str) -> dict[str, Any]:
+        """Fetch Databricks job status via wrapped client."""
+        try:
+            status = await self._client.get_job_status(job_id)
+            return {
+                "job_id": job_id,
+                "status": status.value,
+                "platform": "databricks",
+            }
+        except Exception as exc:
+            logger.error(
+                "databricks_adapter.job_status_failed",
+                job_id=job_id,
+                error=str(exc),
+            )
+            raise PlatformExecutionError(
+                f"Databricks get job status failed: {exc}"
+            ) from exc
+
+    async def create_table(self, schema: dict[str, Any]) -> str:
+        """Create table metadata record for Databricks table operations."""
+        table_id = str(
+            schema.get("table_id") or schema.get(
+                "name") or f"dbx-table-{uuid.uuid4().hex[:12]}"
+        )
+        self._table_definitions[table_id] = dict(schema)
+        logger.info(
+            "databricks_adapter.table_created",
+            table_id=table_id,
+            schema_keys=sorted(schema.keys()),
+        )
+        return table_id
+
+    async def list_tables(self) -> list[dict[str, Any]]:
+        """List Databricks table metadata known by adapter."""
+        return [
+            {"table_id": table_id, "definition": definition}
+            for table_id, definition in self._table_definitions.items()
+        ]
+
+    async def create_shortcut(self, config: dict[str, Any]) -> str:
+        """Create shortcut metadata record for Databricks external links."""
+        shortcut_id = str(config.get("shortcut_id")
+                          or f"dbx-shortcut-{uuid.uuid4().hex[:12]}")
+        self._shortcut_definitions[shortcut_id] = dict(config)
+        logger.info(
+            "databricks_adapter.shortcut_created",
+            shortcut_id=shortcut_id,
+            config_keys=sorted(config.keys()),
+        )
+        return shortcut_id
+
+    async def execute_sql(self, sql: str) -> dict[str, Any]:
+        """Execute SQL through Databricks statement execution path."""
+        if not sql.strip():
+            raise PlatformExecutionError(
+                "Databricks SQL execution requires non-empty SQL.")
+
+        task_id = uuid.uuid4()
+        try:
+            submission = await self._client.submit_job(
+                task_id=task_id,
+                code=sql,
+                environment=self._default_environment,
+                language="sql",
+            )
+            output = await self._client.get_job_output(submission.job_id)
+            return {
+                "job_id": output.job_id,
+                "status": output.status.value,
+                "output": output.output,
+                "error": output.error,
+                "duration_ms": output.duration_ms,
+                "metadata": output.metadata,
+                "platform": "databricks",
+            }
+        except Exception as exc:
+            logger.error(
+                "databricks_adapter.sql_execution_failed",
+                error=str(exc),
+            )
+            raise PlatformExecutionError(
+                f"Databricks SQL execution failed: {exc}"
+            ) from exc
+
+    @staticmethod
+    def _coerce_task_id(raw_task_id: Any) -> uuid.UUID:
+        """Convert incoming task ID value to UUID."""
+        if isinstance(raw_task_id, uuid.UUID):
+            return raw_task_id
+
+        if isinstance(raw_task_id, str) and raw_task_id.strip():
+            try:
+                return uuid.UUID(raw_task_id)
+            except ValueError:
+                pass
+
+        return uuid.uuid4()

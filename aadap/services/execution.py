@@ -33,6 +33,14 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from aadap.agents import (
+    CatalogAgent,
+    ETLPipelineAgent,
+    IngestionAgent,
+    JobSchedulerAgent,
+)
+from aadap.agents.base import AgentContext, BaseAgent
+from aadap.agents.optimization_agent import OptimizationAgent
 from aadap.core.config import get_settings
 from aadap.core.logging import get_logger
 from aadap.db.models import Artifact, Execution, Task
@@ -59,6 +67,34 @@ from aadap.orchestrator.state_machine import TaskState, TaskStateMachine
 from aadap.safety.static_analysis import StaticAnalyzer
 
 logger = get_logger(__name__)
+
+
+# ── Capability Routing Constants ───────────────────────────────────────
+
+_CAPABILITY_TASK_TYPES: set[str] = {
+    "ingestion",
+    "etl_pipeline",
+    "job_scheduler",
+    "catalog",
+}
+
+_TASK_TYPE_KEYWORDS: dict[str, list[str]] = {
+    "ingestion": [
+        "ingest", "autoloader", "auto loader", "copy activity",
+        "streaming", "kafka", "event hub", "cdc",
+    ],
+    "etl_pipeline": [
+        "etl", "elt", "pipeline", "dlt", "delta live",
+        "data factory", "transformation", "medallion",
+    ],
+    "job_scheduler": [
+        "schedule", "cron", "trigger", "dag", "workflow", "job",
+    ],
+    "catalog": [
+        "catalog", "schema", "grant", "permission", "revoke",
+        "unity catalog", "lakehouse", "governance", "ddl",
+    ],
+}
 
 
 # ── SQL Code Generation Prompt ──────────────────────────────────────────
@@ -247,8 +283,18 @@ class ExecutionService:
             # 8. AGENT_ASSIGNED → IN_DEVELOPMENT
             await self._transition(task_id, TaskState.AGENT_ASSIGNED, TaskState.IN_DEVELOPMENT)
 
-            # 9. Generate code via LLM
-            code = await self._generate_code(task, language, platform)
+            # 9. Route to capability agent (if applicable) and generate code
+            task_type = self._classify_task_type(task)
+            capability_artifacts: list[dict[str, Any]] = []
+            if task_type in _CAPABILITY_TASK_TYPES:
+                code, capability_artifacts = await self._execute_capability_agent(
+                    task=task,
+                    task_type=task_type,
+                    platform=platform,
+                    language=language,
+                )
+            else:
+                code = await self._generate_code(task, language, platform)
 
             # 10. Store generated code as artifact
             code_artifact_id = await self._store_artifact(
@@ -256,8 +302,20 @@ class ExecutionService:
                 artifact_type="generated_code",
                 name=f"generated_code.{'sql' if language == 'sql' else 'py'}",
                 content=code,
-                metadata={"language": language},
+                metadata={
+                    "language": language,
+                    "task_type": task_type,
+                    "platform": platform,
+                },
             )
+
+            # Persist additional capability artifacts (pipeline_definition,
+            # job_config, ingestion_config, etc.)
+            if capability_artifacts:
+                await self._persist_capability_artifacts(
+                    task_id=task_id,
+                    artifacts=capability_artifacts,
+                )
 
             # 11. IN_DEVELOPMENT → CODE_GENERATED
             await self._transition(task_id, TaskState.IN_DEVELOPMENT, TaskState.CODE_GENERATED)
@@ -302,34 +360,77 @@ class ExecutionService:
 
             await self._transition(task_id, TaskState.IN_VALIDATION, TaskState.VALIDATION_PASSED)
 
-            # 15. Skip optimization for now → go to DEPLOYING
-            #     VALIDATION_PASSED → APPROVAL_PENDING (for prod) or DEPLOYING (sandbox)
+            # 15. Optimization phase (Phase 8)
+            await self._transition(
+                task_id,
+                TaskState.VALIDATION_PASSED,
+                TaskState.OPTIMIZATION_PENDING,
+            )
+            await self._transition(
+                task_id,
+                TaskState.OPTIMIZATION_PENDING,
+                TaskState.IN_OPTIMIZATION,
+            )
+
+            optimized_code, optimization_summary = await self._run_optimization_phase(
+                task=task,
+                code=code,
+                language=language,
+                platform=platform,
+            )
+
+            await self._store_artifact(
+                task_id=task_id,
+                artifact_type="optimized_code",
+                name=f"optimized_code.{'sql' if language == 'sql' else 'py'}",
+                content=optimized_code,
+                metadata={
+                    "language": language,
+                    "platform": platform,
+                    **optimization_summary,
+                },
+            )
+
+            await self._store_artifact(
+                task_id=task_id,
+                artifact_type="optimization_report",
+                name="optimization_report.json",
+                content=json.dumps(optimization_summary, indent=2),
+                metadata={"task_type": task_type},
+            )
+
+            await self._transition(
+                task_id,
+                TaskState.IN_OPTIMIZATION,
+                TaskState.OPTIMIZED,
+            )
+
+            # 16. OPTIMIZED → APPROVAL_PENDING (for prod) or DEPLOYING (sandbox)
             task = await self._load_task(task_id)  # Reload for latest state
 
             if task.environment == "PRODUCTION":
                 # Needs approval — stop here, user must approve via UI
-                await self._transition(task_id, TaskState.VALIDATION_PASSED, TaskState.APPROVAL_PENDING)
+                await self._transition(task_id, TaskState.OPTIMIZED, TaskState.APPROVAL_PENDING)
                 return {
                     "task_id": str(task_id),
                     "status": "APPROVAL_PENDING",
                     "message": "Production task requires human approval before execution.",
-                    "code": code,
+                    "code": optimized_code,
                     "language": language,
                 }
 
-            # 16. Sandbox: skip approval, straight to execution
-            #     VALIDATION_PASSED can go to OPTIMIZATION_PENDING or APPROVAL_PENDING
-            #     We go VALIDATION_PASSED → APPROVAL_PENDING → IN_REVIEW → APPROVED → DEPLOYING
-            await self._transition(task_id, TaskState.VALIDATION_PASSED, TaskState.APPROVAL_PENDING)
+            # 17. Sandbox: go through approval chain after optimization
+            #     OPTIMIZED → APPROVAL_PENDING → IN_REVIEW → APPROVED → DEPLOYING
+            await self._transition(task_id, TaskState.OPTIMIZED, TaskState.APPROVAL_PENDING)
             await self._transition(task_id, TaskState.APPROVAL_PENDING, TaskState.IN_REVIEW)
             await self._transition(task_id, TaskState.IN_REVIEW, TaskState.APPROVED)
             await self._transition(task_id, TaskState.APPROVED, TaskState.DEPLOYING)
 
-            # 17. Execute on target platform (Databricks or Fabric)
+            # 18. Execute on target platform (Databricks or Fabric)
             if platform == "fabric":
                 execution_result = await self._execute_on_fabric(
                     task_id=task_id,
-                    code=code,
+                    code=optimized_code,
                     environment=task.environment,
                     language=language,
                     code_artifact_id=code_artifact_id,
@@ -337,7 +438,7 @@ class ExecutionService:
             else:
                 execution_result = await self._execute_on_databricks(
                     task_id=task_id,
-                    code=code,
+                    code=optimized_code,
                     environment=task.environment,
                     language=language,
                     code_artifact_id=code_artifact_id,
@@ -353,10 +454,10 @@ class ExecutionService:
                     "message": f"{platform_name} execution failed.",
                 }
 
-            # 18. DEPLOYING → DEPLOYED
+            # 19. DEPLOYING → DEPLOYED
             await self._transition(task_id, TaskState.DEPLOYING, TaskState.DEPLOYED)
 
-            # 19. Store execution result artifact
+            # 20. Store execution result artifact
             await self._store_artifact(
                 task_id=task_id,
                 artifact_type="execution_result",
@@ -369,7 +470,7 @@ class ExecutionService:
                 },
             )
 
-            # 20. DEPLOYED → COMPLETED
+            # 21. DEPLOYED → COMPLETED
             await self._transition(task_id, TaskState.DEPLOYED, TaskState.COMPLETED)
 
             logger.info("execution.completed", task_id=str(task_id))
@@ -381,7 +482,8 @@ class ExecutionService:
                 "job_id": execution_result.get("job_id"),
                 "duration_ms": execution_result.get("duration_ms"),
                 "language": language,
-                "code": code,
+                "code": optimized_code,
+                "task_type": task_type,
             }
 
         except Exception as exc:
@@ -453,6 +555,208 @@ class ExecutionService:
 
         # Default to Databricks
         return "databricks"
+
+    def _classify_task_type(self, task: Task) -> str:
+        """Classify the task for capability routing.
+
+        Returns one of:
+        - ingestion, etl_pipeline, job_scheduler, catalog
+        - developer (fallback for generic codegen)
+        """
+        meta = task.metadata_ or {}
+
+        explicit = meta.get("task_type") or meta.get("capability")
+        if isinstance(explicit, str):
+            normalized = explicit.strip().lower()
+            if normalized in _CAPABILITY_TASK_TYPES:
+                return normalized
+
+        text = f"{task.title or ''}\n{task.description or ''}".lower()
+        scores: dict[str, int] = {}
+        for task_type, keywords in _TASK_TYPE_KEYWORDS.items():
+            score = sum(1 for keyword in keywords if keyword in text)
+            if score:
+                scores[task_type] = score
+
+        if not scores:
+            return "developer"
+        return max(scores, key=scores.get)  # type: ignore[arg-type]
+
+    def _get_capability_agent(
+        self,
+        task_type: str,
+        platform: str,
+        environment: str,
+    ) -> BaseAgent | None:
+        """Return the capability agent instance for the given task type."""
+        if task_type not in _CAPABILITY_TASK_TYPES:
+            return None
+
+        if task_type == "ingestion":
+            return IngestionAgent(
+                agent_id=f"exec-ingestion-{uuid.uuid4().hex[:8]}",
+                llm_client=self._llm,
+                platform_adapter=None,
+            )
+        if task_type == "etl_pipeline":
+            return ETLPipelineAgent(
+                agent_id=f"exec-etl-{uuid.uuid4().hex[:8]}",
+                llm_client=self._llm,
+                platform_adapter=None,
+            )
+        if task_type == "job_scheduler":
+            return JobSchedulerAgent(
+                agent_id=f"exec-scheduler-{uuid.uuid4().hex[:8]}",
+                llm_client=self._llm,
+                platform_adapter=None,
+            )
+        if task_type == "catalog":
+            return CatalogAgent(
+                agent_id=f"exec-catalog-{uuid.uuid4().hex[:8]}",
+                llm_client=self._llm,
+                platform_adapter=None,
+            )
+        return None
+
+    async def _execute_capability_agent(
+        self,
+        task: Task,
+        task_type: str,
+        platform: str,
+        language: str,
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """Execute a capability agent and return generated code + artifacts."""
+        agent = self._get_capability_agent(
+            task_type=task_type,
+            platform=platform,
+            environment=task.environment,
+        )
+        if agent is None:
+            return await self._generate_code(task, language, platform), []
+
+        task_data = {
+            "title": task.title,
+            "description": task.description or "",
+            "platform": platform,
+            "environment": task.environment,
+            **(task.metadata_ or {}),
+        }
+
+        context = AgentContext(
+            task_id=task.id,
+            task_data=task_data,
+            token_budget=task.token_budget,
+            allowed_tools=set(),
+            metadata={"source": "execution_service", "task_type": task_type},
+        )
+
+        await agent.accept_task(context)
+        result = await agent.execute(context)
+
+        if not result.success:
+            raise RuntimeError(
+                result.error or "Capability agent execution failed")
+
+        output = result.output if isinstance(result.output, dict) else {}
+        code = output.get("code")
+        if not isinstance(code, str) or not code.strip():
+            code = json.dumps(output, indent=2)
+
+        return code, result.artifacts
+
+    async def _persist_capability_artifacts(
+        self,
+        task_id: uuid.UUID,
+        artifacts: list[dict[str, Any]],
+    ) -> None:
+        """Persist capability-agent artifacts, including new artifact types."""
+        for index, artifact in enumerate(artifacts, start=1):
+            artifact_type = str(artifact.get("type", "agent_artifact"))
+            content_obj = artifact.get("content", artifact)
+            content = (
+                content_obj
+                if isinstance(content_obj, str)
+                else json.dumps(content_obj, indent=2)
+            )
+            await self._store_artifact(
+                task_id=task_id,
+                artifact_type=artifact_type,
+                name=f"{artifact_type}_{index}.json",
+                content=content,
+                metadata={
+                    "source": "capability_agent",
+                    "artifact_type": artifact_type,
+                },
+            )
+
+    async def _run_optimization_phase(
+        self,
+        task: Task,
+        code: str,
+        language: str,
+        platform: str,
+    ) -> tuple[str, dict[str, Any]]:
+        """Run optimization phase after validation.
+
+        Returns ``(optimized_code, optimization_summary)``.
+        Falls back to the original code if optimization cannot be produced.
+        """
+        if language not in {"python", "scala"}:
+            return code, {
+                "applied": False,
+                "reason": "Language not supported for optimization",
+                "platform": platform,
+            }
+
+        optimization_agent = OptimizationAgent(
+            agent_id=f"exec-opt-{uuid.uuid4().hex[:8]}",
+            llm_client=self._llm,
+        )
+        context = AgentContext(
+            task_id=task.id,
+            task_data={
+                "code": code,
+                "platform": platform,
+                "context": task.description or "",
+                "environment": task.environment,
+            },
+            token_budget=task.token_budget,
+            allowed_tools=set(),
+            metadata={"source": "execution_service"},
+        )
+
+        try:
+            await optimization_agent.accept_task(context)
+            result = await optimization_agent.execute(context)
+        except Exception as exc:  # pragma: no cover
+            return code, {
+                "applied": False,
+                "reason": f"Optimization failed: {exc}",
+                "platform": platform,
+            }
+
+        if not result.success:
+            return code, {
+                "applied": False,
+                "reason": result.error or "Optimization failed",
+                "platform": platform,
+            }
+
+        output = result.output if isinstance(result.output, dict) else {}
+        optimized_code = output.get("optimized_code")
+        if not isinstance(optimized_code, str) or not optimized_code.strip():
+            return code, {
+                "applied": False,
+                "reason": "Missing optimized_code in optimization output",
+                "platform": platform,
+            }
+
+        return optimized_code, {
+            "applied": True,
+            "platform": platform,
+            "changes": output.get("changes", []),
+            "expected_improvement": output.get("expected_improvement"),
+        }
 
     async def _transition(
         self,

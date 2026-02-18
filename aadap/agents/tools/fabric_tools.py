@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from aadap.agents.adapters import FabricAdapter
 from aadap.agents.tools.registry import ToolDefinition, ToolRegistry
 from aadap.core.logging import get_logger
 
@@ -146,6 +147,118 @@ def _make_list_tables_handler(client: BaseFabricClient):
     return _handler
 
 
+def _make_create_pipeline_handler(adapter: FabricAdapter):
+    """Create a Fabric Data Factory pipeline definition."""
+
+    async def _handler(*, definition: dict[str, Any]) -> dict[str, Any]:
+        pipeline_id = await adapter.create_pipeline(definition)
+        return {"pipeline_id": pipeline_id, "platform": "fabric"}
+
+    return _handler
+
+
+def _make_run_pipeline_handler(adapter: FabricAdapter):
+    """Run a Fabric Data Factory pipeline by ID."""
+
+    async def _handler(*, pipeline_id: str) -> dict[str, Any]:
+        return await adapter.execute_pipeline(pipeline_id)
+
+    return _handler
+
+
+def _make_create_lakehouse_handler(adapter: FabricAdapter):
+    """Create Fabric lakehouse metadata via adapter table abstraction."""
+
+    async def _handler(*, config: dict[str, Any]) -> dict[str, Any]:
+        payload = {"resource_type": "lakehouse", **config}
+        lakehouse_id = await adapter.create_table(payload)
+        return {
+            "lakehouse_id": lakehouse_id,
+            "resource_type": "lakehouse",
+            "platform": "fabric",
+        }
+
+    return _handler
+
+
+def _make_create_shortcut_handler(adapter: FabricAdapter):
+    """Create OneLake shortcut metadata via adapter."""
+
+    async def _handler(*, config: dict[str, Any]) -> dict[str, Any]:
+        shortcut_id = await adapter.create_shortcut(config)
+        return {"shortcut_id": shortcut_id, "platform": "fabric"}
+
+    return _handler
+
+
+def _make_create_warehouse_handler(adapter: FabricAdapter):
+    """Create Fabric warehouse metadata via adapter table abstraction."""
+
+    async def _handler(*, config: dict[str, Any]) -> dict[str, Any]:
+        payload = {"resource_type": "warehouse", **config}
+        warehouse_id = await adapter.create_table(payload)
+        return {
+            "warehouse_id": warehouse_id,
+            "resource_type": "warehouse",
+            "platform": "fabric",
+        }
+
+    return _handler
+
+
+def _make_create_dataflow_handler(adapter: FabricAdapter):
+    """Create Dataflow Gen2 metadata via adapter pipeline abstraction."""
+
+    async def _handler(*, definition: dict[str, Any]) -> dict[str, Any]:
+        payload = {"pipeline_type": "dataflow_gen2", **definition}
+        dataflow_id = await adapter.create_pipeline(payload)
+        return {
+            "dataflow_id": dataflow_id,
+            "resource_type": "dataflow_gen2",
+            "platform": "fabric",
+        }
+
+    return _handler
+
+
+def _make_run_dataflow_handler(adapter: FabricAdapter):
+    """Run Dataflow Gen2 by pipeline identifier."""
+
+    async def _handler(*, dataflow_id: str) -> dict[str, Any]:
+        result = await adapter.execute_pipeline(dataflow_id)
+        return {
+            **result,
+            "dataflow_id": dataflow_id,
+            "resource_type": "dataflow_gen2",
+        }
+
+    return _handler
+
+
+def _make_create_schedule_handler(adapter: FabricAdapter):
+    """Create a Fabric schedule metadata record via job abstraction."""
+
+    async def _handler(*, schedule: dict[str, Any]) -> dict[str, Any]:
+        payload = {"resource_type": "schedule", **schedule}
+        schedule_id = await adapter.create_job(payload)
+        return {
+            "schedule_id": schedule_id,
+            "resource_type": "schedule",
+            "platform": "fabric",
+        }
+
+    return _handler
+
+
+def _make_execute_sql_handler(adapter: FabricAdapter):
+    """Execute SQL on Fabric warehouse/lakehouse endpoint."""
+
+    async def _handler(*, sql: str) -> dict[str, Any]:
+        return await adapter.execute_sql(sql)
+
+    return _handler
+
+
 # ── Fabric Tool Definitions ────────────────────────────────────────────
 
 FABRIC_TOOL_NAMES = frozenset({
@@ -154,6 +267,15 @@ FABRIC_TOOL_NAMES = frozenset({
     "fabric_get_job_output",
     "fabric_query_lakehouse",
     "fabric_list_lakehouse_tables",
+    "fabric_create_pipeline",
+    "fabric_run_pipeline",
+    "fabric_create_lakehouse",
+    "fabric_create_shortcut",
+    "fabric_create_warehouse",
+    "fabric_create_dataflow",
+    "fabric_run_dataflow",
+    "fabric_create_schedule",
+    "fabric_execute_sql",
 })
 """Set of all Fabric tool names — useful for building agent permission sets."""
 
@@ -164,6 +286,8 @@ def build_fabric_tools(client: BaseFabricClient) -> list[ToolDefinition]:
 
     Returns a list ready for ``ToolRegistry.register()``.
     """
+    adapter = FabricAdapter(client=client)
+
     return [
         ToolDefinition(
             name="fabric_submit_notebook",
@@ -207,6 +331,69 @@ def build_fabric_tools(client: BaseFabricClient) -> list[ToolDefinition]:
             ),
             handler=_make_list_tables_handler(client),
             requires_approval=False,
+            is_destructive=False,
+        ),
+        ToolDefinition(
+            name="fabric_create_pipeline",
+            description="Create a Microsoft Fabric Data Factory pipeline.",
+            handler=_make_create_pipeline_handler(adapter),
+            requires_approval=True,
+            is_destructive=False,
+        ),
+        ToolDefinition(
+            name="fabric_run_pipeline",
+            description="Execute a Microsoft Fabric Data Factory pipeline.",
+            handler=_make_run_pipeline_handler(adapter),
+            requires_approval=True,
+            is_destructive=False,
+        ),
+        ToolDefinition(
+            name="fabric_create_lakehouse",
+            description="Create Fabric lakehouse metadata definition.",
+            handler=_make_create_lakehouse_handler(adapter),
+            requires_approval=True,
+            is_destructive=False,
+        ),
+        ToolDefinition(
+            name="fabric_create_shortcut",
+            description="Create a OneLake shortcut configuration.",
+            handler=_make_create_shortcut_handler(adapter),
+            requires_approval=True,
+            is_destructive=False,
+        ),
+        ToolDefinition(
+            name="fabric_create_warehouse",
+            description="Create Fabric warehouse metadata definition.",
+            handler=_make_create_warehouse_handler(adapter),
+            requires_approval=True,
+            is_destructive=False,
+        ),
+        ToolDefinition(
+            name="fabric_create_dataflow",
+            description="Create a Fabric Dataflow Gen2 definition.",
+            handler=_make_create_dataflow_handler(adapter),
+            requires_approval=True,
+            is_destructive=False,
+        ),
+        ToolDefinition(
+            name="fabric_run_dataflow",
+            description="Execute a Fabric Dataflow Gen2 definition.",
+            handler=_make_run_dataflow_handler(adapter),
+            requires_approval=True,
+            is_destructive=False,
+        ),
+        ToolDefinition(
+            name="fabric_create_schedule",
+            description="Create a Fabric schedule configuration.",
+            handler=_make_create_schedule_handler(adapter),
+            requires_approval=True,
+            is_destructive=False,
+        ),
+        ToolDefinition(
+            name="fabric_execute_sql",
+            description="Execute SQL on Fabric warehouse or lakehouse endpoint.",
+            handler=_make_execute_sql_handler(adapter),
+            requires_approval=True,
             is_destructive=False,
         ),
     ]

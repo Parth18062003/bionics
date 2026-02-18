@@ -167,6 +167,184 @@ _AGENT_CATALOG: list[AgentCatalogEntry] = [
         config_defaults={"language": "sql", "environment": "SANDBOX"},
     ),
     AgentCatalogEntry(
+        id="ingestion-databricks",
+        name="Databricks Ingestion Agent",
+        description=(
+            "Generates and executes data ingestion pipelines on Azure Databricks. "
+            "Supports batch (Auto Loader), streaming (Kafka, Event Hubs), "
+            "and CDC (Change Data Feed, Debezium) patterns with "
+            "exactly-once semantics and checkpoint-based restartability."
+        ),
+        platform="Azure Databricks",
+        languages=["python", "sql"],
+        capabilities=[
+            "Batch ingestion via Auto Loader (cloudFiles)",
+            "Streaming ingestion via Structured Streaming",
+            "CDC ingestion via Delta Change Data Feed",
+            "Schema inference and evolution",
+            "Checkpoint-based exactly-once semantics",
+            "Self-correction (up to 3 attempts per INV-03)",
+        ],
+        icon="📥",
+        status="beta",
+        config_defaults={"language": "python", "environment": "SANDBOX"},
+    ),
+    AgentCatalogEntry(
+        id="ingestion-fabric",
+        name="Fabric Ingestion Agent",
+        description=(
+            "Generates and executes data ingestion pipelines on Microsoft Fabric. "
+            "Supports batch (Copy Activity, Dataflow Gen2), streaming "
+            "(Event Streams), and CDC patterns with lakehouse integration."
+        ),
+        platform="Microsoft Fabric",
+        languages=["python", "sql"],
+        capabilities=[
+            "Batch ingestion via Copy Activity / Dataflow Gen2",
+            "Streaming ingestion via Event Streams",
+            "CDC ingestion via MERGE patterns",
+            "Lakehouse and Warehouse target support",
+            "OneLake shortcut integration",
+            "Self-correction (up to 3 attempts per INV-03)",
+        ],
+        icon="📥",
+        status="beta",
+        config_defaults={"language": "python", "environment": "SANDBOX"},
+    ),
+    AgentCatalogEntry(
+        id="etl-databricks",
+        name="Databricks ETL Pipeline Agent",
+        description=(
+            "Generates and executes ETL/ELT pipelines on Azure Databricks. "
+            "Supports Delta Live Tables (DLT), multi-task workflows, "
+            "and transformation notebooks with built-in data quality "
+            "expectations and medallion architecture patterns."
+        ),
+        platform="Azure Databricks",
+        languages=["python", "sql"],
+        capabilities=[
+            "Delta Live Tables pipeline generation",
+            "Multi-task workflow orchestration",
+            "Data quality expectations (@dlt.expect)",
+            "Medallion architecture (bronze/silver/gold)",
+            "Notebook code generation",
+            "Self-correction (up to 3 attempts per INV-03)",
+        ],
+        icon="\u2699\ufe0f",
+        status="beta",
+        config_defaults={"language": "python", "environment": "SANDBOX"},
+    ),
+    AgentCatalogEntry(
+        id="etl-fabric",
+        name="Fabric ETL Pipeline Agent",
+        description=(
+            "Generates and executes ETL/ELT pipelines on Microsoft Fabric. "
+            "Supports Data Factory pipelines, Dataflow Gen2, and "
+            "transformation notebooks with Lakehouse and Warehouse targets."
+        ),
+        platform="Microsoft Fabric",
+        languages=["python", "sql"],
+        capabilities=[
+            "Data Factory pipeline generation",
+            "Dataflow Gen2 integration",
+            "Notebook transformation code",
+            "Lakehouse and Warehouse targets",
+            "Parameterised pipeline support",
+            "Self-correction (up to 3 attempts per INV-03)",
+        ],
+        icon="\u2699\ufe0f",
+        status="beta",
+        config_defaults={"language": "python", "environment": "SANDBOX"},
+    ),
+    AgentCatalogEntry(
+        id="scheduler-databricks",
+        name="Databricks Job Scheduler Agent",
+        description=(
+            "Generates and creates multi-task job definitions on Azure Databricks. "
+            "Supports DAG-based task dependencies, cron schedules, event triggers, "
+            "cluster auto-scaling, retry policies, and notification settings."
+        ),
+        platform="Azure Databricks",
+        languages=["python", "sql", "json"],
+        capabilities=[
+            "Multi-task job definition (Jobs API v2.1)",
+            "Task DAG with parallelism",
+            "Cron and event-based triggers",
+            "Cluster auto-scaling configuration",
+            "Retry and timeout policies",
+            "Self-correction (up to 3 attempts per INV-03)",
+        ],
+        icon="\u23f0",
+        status="beta",
+        config_defaults={"language": "python", "environment": "SANDBOX"},
+    ),
+    AgentCatalogEntry(
+        id="scheduler-fabric",
+        name="Fabric Job Scheduler Agent",
+        description=(
+            "Generates and creates scheduled pipelines and triggers on Microsoft "
+            "Fabric. Supports Data Factory triggers, notebook scheduling, and "
+            "event-driven orchestration with Fabric items."
+        ),
+        platform="Microsoft Fabric",
+        languages=["python", "sql", "json"],
+        capabilities=[
+            "Data Factory trigger configuration",
+            "Pipeline scheduling (cron / event)",
+            "Notebook job orchestration",
+            "Retry and timeout policies",
+            "SLA-aware scheduling",
+            "Self-correction (up to 3 attempts per INV-03)",
+        ],
+        icon="\u23f0",
+        status="beta",
+        config_defaults={"language": "python", "environment": "SANDBOX"},
+    ),
+    AgentCatalogEntry(
+        id="catalog-databricks",
+        name="Databricks Catalog Agent",
+        description=(
+            "Designs and manages Unity Catalog resources on Azure Databricks. "
+            "Generates DDL for catalogs, schemas, tables, and volumes; and "
+            "supports governed permission grants with approval gates."
+        ),
+        platform="Azure Databricks",
+        languages=["sql", "json"],
+        capabilities=[
+            "Unity Catalog schema/resource design",
+            "Catalog, schema, table, volume DDL generation",
+            "Permission grant planning and execution",
+            "Approval-gated grant/drop operations",
+            "Least-privilege governance patterns",
+            "Self-correction (up to 3 attempts per INV-03)",
+        ],
+        icon="🗂️",
+        status="beta",
+        config_defaults={"language": "sql", "environment": "SANDBOX"},
+    ),
+    AgentCatalogEntry(
+        id="catalog-fabric",
+        name="Fabric Catalog Agent",
+        description=(
+            "Designs and manages Lakehouse/Warehouse metadata resources in "
+            "Microsoft Fabric. Generates schema DDL/API payloads and governed "
+            "permissions for secure, least-privilege access."
+        ),
+        platform="Microsoft Fabric",
+        languages=["sql", "json"],
+        capabilities=[
+            "Lakehouse/Warehouse schema planning",
+            "DDL and resource payload generation",
+            "Permission grant planning and execution",
+            "Approval-gated grant/drop operations",
+            "Least-privilege governance patterns",
+            "Self-correction (up to 3 attempts per INV-03)",
+        ],
+        icon="🗂️",
+        status="beta",
+        config_defaults={"language": "sql", "environment": "SANDBOX"},
+    ),
+    AgentCatalogEntry(
         id="adb-optimization",
         name="ADB Optimization Agent",
         description=(

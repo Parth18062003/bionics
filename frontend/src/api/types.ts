@@ -37,6 +37,38 @@ export interface TaskCreateRequest {
     agent_type?: string;
     language?: string;
     auto_execute?: boolean;
+    capability_config?: IngestionConfig | PipelineConfig | JobConfig;
+}
+
+// ── Capability Config Types ────────────────────────────────────────────
+
+export interface IngestionConfig {
+    /** Source system type, e.g. "adls", "sql_server", "kafka". */
+    source_type: string;
+    /** Target system type, e.g. "delta_lake", "lakehouse". */
+    target_type: string;
+    ingestion_mode: 'batch' | 'streaming' | 'cdc';
+}
+
+export interface Transformation {
+    name: string;
+    type: string;
+}
+
+export interface ScheduleConfig {
+    cron_expression?: string;
+    interval_minutes?: number;
+    timezone?: string;
+}
+
+export interface PipelineConfig {
+    pipeline_type: 'dlt' | 'datafactory' | 'workflow';
+    transformations: Transformation[];
+}
+
+export interface JobConfig {
+    job_type: 'notebook' | 'spark' | 'pipeline';
+    schedule?: ScheduleConfig;
 }
 
 // ── Agent Marketplace Types ────────────────────────────────────────────

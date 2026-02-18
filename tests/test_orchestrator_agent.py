@@ -18,7 +18,12 @@ import uuid
 import pytest
 
 from aadap.agents.base import AgentContext, AgentState
-from aadap.agents.orchestrator_agent import MAX_SELF_CORRECTIONS, OrchestratorAgent
+from aadap.agents.orchestrator_agent import (
+    MAX_SELF_CORRECTIONS,
+    OrchestratorAgent,
+    classify_task_type,
+    KNOWN_AGENT_TYPES,
+)
 from aadap.integrations.llm_client import LLMResponse, MockLLMClient
 
 
@@ -179,3 +184,106 @@ class TestOrchestratorAgentTokenBudget:
 
         assert result.success is False
         assert "Token budget exhausted" in result.error or "ESCALATE" in result.error
+
+
+# ── Phase 7: Capability Routing Tests ──────────────────────────────────
+
+
+class TestClassifyTaskType:
+    """Phase 7: deterministic keyword-based task classification."""
+
+    def test_ingestion_keywords(self):
+        assert classify_task_type(
+            "Set up Auto Loader ingestion") == "ingestion"
+        assert classify_task_type("Ingest data from Kafka") == "ingestion"
+        assert classify_task_type(
+            "Load data from Event Hub with CDC") == "ingestion"
+
+    def test_etl_pipeline_keywords(self):
+        assert classify_task_type(
+            "Build a DLT pipeline for medallion") == "etl_pipeline"
+        assert classify_task_type("Create Data Factory ETL") == "etl_pipeline"
+        assert classify_task_type(
+            "Transformation from bronze to gold") == "etl_pipeline"
+
+    def test_job_scheduler_keywords(self):
+        assert classify_task_type(
+            "Schedule a daily cron job") == "job_scheduler"
+        assert classify_task_type(
+            "Create a DAG workflow trigger") == "job_scheduler"
+
+    def test_catalog_keywords(self):
+        assert classify_task_type("Create Unity Catalog schema") == "catalog"
+        assert classify_task_type("Grant SELECT permission") == "catalog"
+        assert classify_task_type("Set up lakehouse governance") == "catalog"
+
+    def test_no_match_returns_none(self):
+        assert classify_task_type("Write a hello world program") is None
+
+    def test_known_agent_types_complete(self):
+        """All capability keywords map to known agent types."""
+        assert "ingestion" in KNOWN_AGENT_TYPES
+        assert "etl_pipeline" in KNOWN_AGENT_TYPES
+        assert "job_scheduler" in KNOWN_AGENT_TYPES
+        assert "catalog" in KNOWN_AGENT_TYPES
+
+
+class TestOrchestratorCapabilityRouting:
+    """Phase 7: capability hint is injected into orchestrator prompt."""
+
+    async def test_ingestion_hint_injected(self):
+        """Ingestion-related task should inject hint into LLM prompt."""
+        captured: list[str] = []
+
+        class CapturingLLM(MockLLMClient):
+            async def complete(self, prompt, model=None, max_tokens=4096):
+                captured.append(prompt)
+                return await super().complete(prompt, model, max_tokens)
+
+        decision = json.dumps({
+            "agent_assignment": "ingestion",
+            "sub_tasks": [{"description": "Ingest from Kafka", "agent": "ingestion"}],
+            "priority": 7,
+            "reasoning": "Task is about data ingestion from streaming source.",
+        })
+        llm = CapturingLLM(default_response=decision)
+        agent = OrchestratorAgent(agent_id="orch-p7-1", llm_client=llm)
+        ctx = _make_context(
+            task_data={
+                "title": "Stream from Kafka",
+                "description": "Ingest events from Kafka to Delta table",
+                "environment": "SANDBOX",
+            },
+        )
+
+        await agent.accept_task(ctx)
+        result = await agent.execute(ctx)
+
+        assert result.success is True
+        assert result.output["agent_assignment"] == "ingestion"
+        assert "ingestion" in captured[0].lower()
+
+    async def test_no_hint_for_generic_task(self):
+        """Generic task should not inject any capability hint."""
+        captured: list[str] = []
+
+        class CapturingLLM(MockLLMClient):
+            async def complete(self, prompt, model=None, max_tokens=4096):
+                captured.append(prompt)
+                return await super().complete(prompt, model, max_tokens)
+
+        llm = CapturingLLM(default_response=_valid_decision())
+        agent = OrchestratorAgent(agent_id="orch-p7-2", llm_client=llm)
+        ctx = _make_context(
+            task_data={
+                "title": "Hello world",
+                "description": "Just a simple hello world test",
+                "environment": "SANDBOX",
+            },
+        )
+
+        await agent.accept_task(ctx)
+        result = await agent.execute(ctx)
+
+        assert result.success is True
+        assert "Capability hint" not in captured[0]

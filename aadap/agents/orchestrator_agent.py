@@ -45,6 +45,57 @@ logger = get_logger(__name__)
 MAX_SELF_CORRECTIONS = 3  # INV-03: hard upper bound
 DEFAULT_MODEL = "gpt-4o"
 
+# ── Capability Routing ─────────────────────────────────────────────────
+
+KNOWN_AGENT_TYPES: set[str] = {
+    "developer",
+    "validation",
+    "optimization",
+    "ingestion",
+    "etl_pipeline",
+    "job_scheduler",
+    "catalog",
+}
+
+_CAPABILITY_KEYWORDS: dict[str, list[str]] = {
+    "ingestion": [
+        "ingest", "auto loader", "autoloader", "copy activity",
+        "streaming", "kafka", "event hub", "cdc", "change data capture",
+        "load data", "import data", "data loading",
+    ],
+    "etl_pipeline": [
+        "etl", "elt", "pipeline", "dlt", "delta live",
+        "data factory", "datafactory", "transformation",
+        "medallion", "bronze", "silver", "gold",
+    ],
+    "job_scheduler": [
+        "schedule", "cron", "trigger", "dag", "workflow",
+        "orchestrat", "job", "recurring", "automat",
+    ],
+    "catalog": [
+        "catalog", "schema", "grant", "permission", "revoke",
+        "unity catalog", "lakehouse", "governance", "ddl",
+        "create table", "create schema", "access control",
+    ],
+}
+
+
+def classify_task_type(description: str) -> str | None:
+    """Classify a task description into a capability agent type.
+
+    Returns ``None`` when no clear match is found, letting the
+    orchestrator LLM decide.
+    """
+    lower = description.lower()
+    scores: dict[str, int] = {}
+    for agent_type, keywords in _CAPABILITY_KEYWORDS.items():
+        score = sum(1 for kw in keywords if kw in lower)
+        if score:
+            scores[agent_type] = score
+    if not scores:
+        return None
+    return max(scores, key=scores.get)  # type: ignore[arg-type]
+
 
 # ── OrchestratorAgent ──────────────────────────────────────────────────
 
@@ -76,13 +127,38 @@ class OrchestratorAgent(BaseAgent):
         """
         Produce a task routing decision.
 
+        Phase 1: Run keyword-based capability classification.
+        Phase 2: Call LLM for full decomposition + assignment, injecting
+                 the hint from Phase 1 if available.
+
         Self-corrects up to MAX_SELF_CORRECTIONS times on schema failures.
         Escalates on token exhaustion or persistent schema violations.
         """
         task_data = context.task_data
+        description = task_data.get("description", "")
+
+        # Phase 1: deterministic capability hint
+        capability_hint = classify_task_type(description)
+        if capability_hint:
+            logger.info(
+                "orchestrator.capability_hint",
+                agent_id=self._agent_id,
+                task_id=str(context.task_id),
+                hint=capability_hint,
+            )
+
+        hint_text = ""
+        if capability_hint:
+            hint_text = (
+                f"\n\nCapability hint: this task likely requires the "
+                f"'{capability_hint}' agent.  Use this hint when making "
+                f"your assignment but override it if the full task "
+                f"description suggests otherwise."
+            )
+
         prompt = ORCHESTRATOR_DECISION_PROMPT.render({
             "title": task_data.get("title", ""),
-            "description": task_data.get("description", ""),
+            "description": f"{description}{hint_text}",
             "environment": task_data.get("environment", "SANDBOX"),
         })
 
