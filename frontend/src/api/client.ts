@@ -27,6 +27,16 @@ import type {
     AgentCatalogEntry,
     ExecutionTriggerResponse,
     ExecutionRecord,
+    CatalogResponse,
+    SchemaResponse,
+    TableResponse,
+    TableDetailResponse,
+    TablePreviewResponse,
+    FileResponse,
+    NotebookResponse,
+    JobResponse,
+    PipelineResponse,
+    QuickAction,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -200,4 +210,81 @@ export async function executeTask(taskId: string): Promise<ExecutionTriggerRespo
 
 export async function getExecutions(taskId: string): Promise<ExecutionRecord[]> {
     return apiFetch<ExecutionRecord[]>(`/api/v1/executions/${taskId}`);
+}
+
+// ── Explorer API ────────────────────────────────────────────────────────
+
+export async function listCatalogs(platform: 'fabric' | 'databricks'): Promise<CatalogResponse[]> {
+    return apiFetch<CatalogResponse[]>(`/api/v1/explorer/${platform}/catalogs`);
+}
+
+export async function listSchemas(platform: 'fabric' | 'databricks', catalog: string): Promise<SchemaResponse[]> {
+    const params = new URLSearchParams({ catalog });
+    return apiFetch<SchemaResponse[]>(`/api/v1/explorer/${platform}/schemas?${params}`);
+}
+
+export async function listTables(platform: 'fabric' | 'databricks', catalog: string, schema: string): Promise<TableResponse[]> {
+    const params = new URLSearchParams({ catalog, schema });
+    return apiFetch<TableResponse[]>(`/api/v1/explorer/${platform}/tables?${params}`);
+}
+
+export async function getTableDetail(platform: 'fabric' | 'databricks', fullName: string): Promise<TableDetailResponse> {
+    return apiFetch<TableDetailResponse>(`/api/v1/explorer/${platform}/tables/${encodeURIComponent(fullName)}`);
+}
+
+export async function previewTable(platform: 'fabric' | 'databricks', fullName: string, limit = 100): Promise<TablePreviewResponse> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    return apiFetch<TablePreviewResponse>(`/api/v1/explorer/${platform}/tables/${encodeURIComponent(fullName)}/preview?${params}`);
+}
+
+export async function listExplorerFiles(
+    platform: 'fabric' | 'databricks',
+    path: string,
+    workspaceId?: string,
+    lakehouseId?: string
+): Promise<FileResponse[]> {
+    const params = new URLSearchParams({ path });
+    if (workspaceId) params.set('workspace_id', workspaceId);
+    if (lakehouseId) params.set('lakehouse_id', lakehouseId);
+    return apiFetch<FileResponse[]>(`/api/v1/explorer/${platform}/files?${params}`);
+}
+
+export async function listExplorerNotebooks(
+    platform: 'fabric' | 'databricks',
+    path?: string,
+    workspaceId?: string
+): Promise<NotebookResponse[]> {
+    const params = new URLSearchParams();
+    if (path) params.set('path', path);
+    if (workspaceId) params.set('workspace_id', workspaceId);
+    return apiFetch<NotebookResponse[]>(`/api/v1/explorer/${platform}/notebooks?${params}`);
+}
+
+export async function listExplorerJobs(platform: 'fabric' | 'databricks'): Promise<JobResponse[]> {
+    return apiFetch<JobResponse[]>(`/api/v1/explorer/${platform}/jobs`);
+}
+
+export async function listExplorerPipelines(
+    platform: 'fabric' | 'databricks',
+    workspaceId?: string
+): Promise<PipelineResponse[]> {
+    const params = new URLSearchParams();
+    if (workspaceId) params.set('workspace_id', workspaceId);
+    return apiFetch<PipelineResponse[]>(`/api/v1/explorer/${platform}/pipelines?${params}`);
+}
+
+export async function listLakehouses(workspaceId: string): Promise<SchemaResponse[]> {
+    const params = new URLSearchParams({ workspace_id: workspaceId });
+    return apiFetch<SchemaResponse[]>(`/api/v1/explorer/fabric/lakehouses?${params}`);
+}
+
+export async function listShortcuts(workspaceId: string, lakehouseId: string): Promise<Record<string, unknown>[]> {
+    const params = new URLSearchParams({ workspace_id: workspaceId, lakehouse_id: lakehouseId });
+    return apiFetch<Record<string, unknown>[]>(`/api/v1/explorer/fabric/shortcuts?${params}`);
+}
+
+// ── Quick Actions API ───────────────────────────────────────────────────
+
+export async function getQuickActions(): Promise<QuickAction[]> {
+    return apiFetch<QuickAction[]>('/api/v1/tasks/quick-actions');
 }

@@ -20,6 +20,9 @@ export interface Task {
     retry_count: number;
     created_at: string;
     updated_at: string;
+    task_mode?: TaskMode | null;
+    operation_type?: OperationType | null;
+    platform?: 'fabric' | 'databricks' | null;
 }
 
 export interface TaskListResponse {
@@ -29,15 +32,56 @@ export interface TaskListResponse {
     page_size: number;
 }
 
+// ── Task Mode & Operation Types ─────────────────────────────────────────
+
+export type TaskMode = 'generate_code' | 'execute_code' | 'read' | 'list' | 'manage';
+
+export type OperationType =
+    | 'generate_notebook'
+    | 'generate_pipeline'
+    | 'generate_job'
+    | 'execute_notebook'
+    | 'execute_sql'
+    | 'list_tables'
+    | 'list_files'
+    | 'list_notebooks'
+    | 'list_pipelines'
+    | 'list_jobs'
+    | 'preview_table'
+    | 'get_schema'
+    | 'create_table'
+    | 'drop_table'
+    | 'create_shortcut'
+    | 'custom';
+
+export interface QuickAction {
+    id: string;
+    label: string;
+    description: string;
+    operation_type: OperationType;
+    task_mode: TaskMode;
+    platform: 'fabric' | 'databricks' | 'any';
+    icon?: string;
+}
+
 export interface TaskCreateRequest {
     title: string;
     description?: string;
     priority?: number;
     environment?: string;
     agent_type?: string;
+    capability_id?: string;
     language?: string;
     auto_execute?: boolean;
     capability_config?: IngestionConfig | PipelineConfig | JobConfig;
+    task_mode?: TaskMode;
+    operation_type?: OperationType;
+    platform?: 'fabric' | 'databricks';
+    catalog?: string;
+    schema_name?: string;
+    table?: string;
+    file_path?: string;
+    selection_context?: Record<string, unknown>;
 }
 
 // ── Capability Config Types ────────────────────────────────────────────
@@ -242,3 +286,93 @@ export const STATE_LABELS: Record<string, string> = {
     COMPLETED: 'Completed',
     CANCELLED: 'Cancelled',
 };
+
+// ── Explorer Types ───────────────────────────────────────────────────────
+
+export interface CatalogResponse {
+    id: string;
+    name: string;
+    type: string;
+    description?: string | null;
+}
+
+export interface SchemaResponse {
+    id: string;
+    name: string;
+    catalog_id: string;
+    type: string;
+    description?: string | null;
+}
+
+export interface TableResponse {
+    id: string;
+    name: string;
+    schema_name: string;
+    catalog_name: string;
+    full_name: string;
+    type: string;
+    row_count?: number | null;
+}
+
+export interface ColumnResponse {
+    name: string;
+    data_type: string;
+    nullable: boolean;
+    comment?: string | null;
+}
+
+export interface TableDetailResponse {
+    id: string;
+    name: string;
+    schema_name: string;
+    catalog_name: string;
+    full_name: string;
+    columns: ColumnResponse[];
+    table_type?: string | null;
+    row_count?: number | null;
+    comment?: string | null;
+}
+
+export interface TablePreviewResponse {
+    columns: string[];
+    rows: unknown[][];
+    row_count: number;
+    truncated: boolean;
+}
+
+export interface FileResponse {
+    name: string;
+    path: string;
+    type: string;
+    size?: number | null;
+}
+
+export interface NotebookResponse {
+    id: string;
+    name: string;
+    path?: string | null;
+}
+
+export interface JobResponse {
+    id: string;
+    name: string;
+    status?: string | null;
+}
+
+export interface PipelineResponse {
+    id: string;
+    name: string;
+    status?: string | null;
+}
+
+// ── Quick Actions List ───────────────────────────────────────────────────
+
+export const QUICK_ACTIONS: QuickAction[] = [
+    { id: 'list-tables', label: 'List Tables', description: 'List all tables in a schema', operation_type: 'list_tables', task_mode: 'list', platform: 'any', icon: 'table' },
+    { id: 'preview-table', label: 'Preview Table', description: 'Preview data from a table', operation_type: 'preview_table', task_mode: 'read', platform: 'any', icon: 'eye' },
+    { id: 'get-schema', label: 'Get Schema', description: 'Get table schema and columns', operation_type: 'get_schema', task_mode: 'read', platform: 'any', icon: 'schema' },
+    { id: 'list-files', label: 'List Files', description: 'List files in a directory', operation_type: 'list_files', task_mode: 'list', platform: 'any', icon: 'folder' },
+    { id: 'list-notebooks', label: 'List Notebooks', description: 'List all notebooks', operation_type: 'list_notebooks', task_mode: 'list', platform: 'any', icon: 'notebook' },
+    { id: 'generate-notebook', label: 'Generate Notebook', description: 'Create a new notebook', operation_type: 'generate_notebook', task_mode: 'generate_code', platform: 'any', icon: 'code' },
+    { id: 'generate-pipeline', label: 'Generate Pipeline', description: 'Create a new pipeline', operation_type: 'generate_pipeline', task_mode: 'generate_code', platform: 'any', icon: 'pipeline' },
+];

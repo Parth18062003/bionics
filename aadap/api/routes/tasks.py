@@ -63,6 +63,13 @@ class TaskCreateRequest(BaseModel):
         default=None,
         description="Agent marketplace ID (e.g. 'adb-sql', 'adb-python').",
     )
+    capability_id: str | None = Field(
+        default=None,
+        description=(
+            "Canonical capability identifier (ingestion, etl_pipeline, "
+            "job_scheduler, catalog) or marketplace capability alias."
+        ),
+    )
     language: str | None = Field(
         default=None,
         description="Target language: 'sql' or 'python'. Inferred from agent_type if omitted.",
@@ -71,6 +78,36 @@ class TaskCreateRequest(BaseModel):
         default=False,
         description="If true, immediately triggers end-to-end execution after task creation.",
     )
+    capability_config: dict[str, Any] | None = Field(
+        default=None,
+        description="Structured capability configuration payload from frontend.",
+    )
+
+    # New fields for task modes
+    task_mode: str | None = Field(
+        default=None,
+        description=(
+            "Task execution mode: 'generate_code', 'execute_code', 'read', 'list', 'manage'. "
+            "Inferred from operation_type if omitted."
+        ),
+    )
+    operation_type: str | None = Field(
+        default=None,
+        description=(
+            "Specific operation: 'list_tables', 'preview_table', 'execute_query', etc. "
+            "Determines whether code generation is needed."
+        ),
+    )
+
+    # Selection context for read/list operations
+    catalog: str | None = Field(default=None, description="Catalog name for operations.")
+    schema_name: str | None = Field(default=None, description="Schema name for operations.")
+    table: str | None = Field(default=None, description="Table name for operations.")
+    table_fqn: str | None = Field(default=None, description="Fully qualified table name (catalog.schema.table).")
+    path: str | None = Field(default=None, description="File path for list/read operations.")
+    query: str | None = Field(default=None, description="SQL query for execute_query operation.")
+    limit: int | None = Field(default=100, description="Row limit for preview operations.")
+    platform: str | None = Field(default=None, description="Target platform: 'databricks' or 'fabric'.")
 
 
 class TaskResponse(BaseModel):
@@ -88,6 +125,9 @@ class TaskResponse(BaseModel):
     retry_count: int
     created_at: str
     updated_at: str
+    task_mode: str | None = None
+    operation_type: str | None = None
+    platform: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -162,10 +202,21 @@ async def create_task_endpoint(
     metadata: dict = {}
     if body.agent_type:
         metadata["agent_type"] = body.agent_type
+
+    normalized_capability = _normalize_capability_id(
+        body.capability_id or body.agent_type
+    )
+    if normalized_capability is not None:
+        metadata["capability_id"] = normalized_capability
+        metadata["task_type"] = normalized_capability
+        metadata["capability"] = normalized_capability
+
+    if body.capability_config:
+        metadata["capability_config"] = body.capability_config
+
     if body.language:
         metadata["language"] = body.language
     elif body.agent_type:
-        # Infer language from agent_type
         _lang_map = {
             "adb-sql": "sql",
             "adb-python": "python",
@@ -174,6 +225,50 @@ async def create_task_endpoint(
             "fabric-python": "python",
         }
         metadata["language"] = _lang_map.get(body.agent_type, "sql")
+
+    # Handle task_mode and operation_type
+    from aadap.core.task_types import (
+        TaskMode,
+        OperationType,
+        get_task_mode,
+        requires_code_generation,
+    )
+
+    if body.operation_type:
+        metadata["operation_type"] = body.operation_type
+        inferred_mode = get_task_mode(body.operation_type)
+        if body.task_mode is None:
+            metadata["task_mode"] = inferred_mode.value
+        else:
+            metadata["task_mode"] = body.task_mode
+        metadata["requires_code_generation"] = requires_code_generation(body.operation_type)
+    elif body.task_mode:
+        metadata["task_mode"] = body.task_mode
+        metadata["requires_code_generation"] = body.task_mode in (
+            TaskMode.GENERATE_CODE.value,
+            TaskMode.EXECUTE_CODE.value,
+        )
+    else:
+        metadata["task_mode"] = TaskMode.GENERATE_CODE.value
+        metadata["requires_code_generation"] = True
+
+    # Selection context for read/list operations
+    if body.catalog:
+        metadata["catalog"] = body.catalog
+    if body.schema_name:
+        metadata["schema"] = body.schema_name
+    if body.table:
+        metadata["table"] = body.table
+    if body.table_fqn:
+        metadata["table_fqn"] = body.table_fqn
+    if body.path:
+        metadata["path"] = body.path
+    if body.query:
+        metadata["query"] = body.query
+    if body.limit:
+        metadata["limit"] = body.limit
+    if body.platform:
+        metadata["platform"] = body.platform
 
     task_id = await create_task(
         title=body.title,
@@ -374,6 +469,7 @@ async def get_task_events(
 
 def _task_to_response(task: Task) -> TaskResponse:
     """Convert a Task ORM object to a TaskResponse."""
+    metadata = task.metadata_ or {}
     return TaskResponse(
         id=str(task.id),
         title=task.title,
@@ -387,4 +483,56 @@ def _task_to_response(task: Task) -> TaskResponse:
         retry_count=task.retry_count,
         created_at=task.created_at.isoformat() if task.created_at else "",
         updated_at=task.updated_at.isoformat() if task.updated_at else "",
+        task_mode=metadata.get("task_mode"),
+        operation_type=metadata.get("operation_type"),
+        platform=metadata.get("platform"),
     )
+
+
+class QuickActionResponse(BaseModel):
+    """Quick action definition for frontend."""
+
+    id: str
+    label: str
+    description: str
+    icon: str
+    operation_type: str
+    task_mode: str
+    requires_selection: str
+    platforms: list[str]
+
+
+@router.get(
+    "/quick-actions",
+    response_model=list[QuickActionResponse],
+    summary="Get available quick actions",
+    description="Returns list of one-click operations that don't require code generation.",
+)
+async def get_quick_actions() -> list[QuickActionResponse]:
+    """Get quick actions for the frontend task wizard."""
+    from aadap.core.task_types import QUICK_ACTIONS
+    return [QuickActionResponse(**action) for action in QUICK_ACTIONS]
+
+
+def _normalize_capability_id(value: str | None) -> str | None:
+    """Normalize frontend capability/agent identifiers to canonical task types."""
+    if value is None:
+        return None
+
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+
+    if normalized in {"ingestion", "etl_pipeline", "job_scheduler", "catalog"}:
+        return normalized
+
+    if normalized.startswith("ingestion"):
+        return "ingestion"
+    if normalized.startswith("etl"):
+        return "etl_pipeline"
+    if normalized.startswith("scheduler"):
+        return "job_scheduler"
+    if normalized.startswith("catalog"):
+        return "catalog"
+
+    return None

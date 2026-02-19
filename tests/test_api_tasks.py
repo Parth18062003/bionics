@@ -90,6 +90,45 @@ async def test_create_task_returns_201(test_app, client, mock_task):
 
 
 @pytest.mark.asyncio
+async def test_create_task_persists_capability_contract(test_app, client, mock_task):
+    """POST /api/v1/tasks persists normalized capability metadata and config."""
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_task
+
+    test_app.dependency_overrides[get_session] = _override_session(mock_result)
+
+    with patch(
+        "aadap.api.routes.tasks.create_task",
+        new_callable=AsyncMock,
+        return_value=mock_task.id,
+    ) as create_task_mock:
+        try:
+            response = await client.post(
+                "/api/v1/tasks",
+                json={
+                    "title": "Capability Task",
+                    "environment": "SANDBOX",
+                    "agent_type": "etl-databricks",
+                    "capability_id": "etl-databricks",
+                    "capability_config": {
+                        "pipeline_type": "dlt",
+                        "transformations": [],
+                    },
+                },
+            )
+        finally:
+            test_app.dependency_overrides.pop(get_session, None)
+
+    assert response.status_code == 201
+    metadata = create_task_mock.await_args.kwargs["metadata"]
+    assert metadata["agent_type"] == "etl-databricks"
+    assert metadata["capability_id"] == "etl_pipeline"
+    assert metadata["task_type"] == "etl_pipeline"
+    assert metadata["capability"] == "etl_pipeline"
+    assert metadata["capability_config"]["pipeline_type"] == "dlt"
+
+
+@pytest.mark.asyncio
 async def test_create_task_requires_title(client):
     """POST /api/v1/tasks without title should return 422."""
     response = await client.post(

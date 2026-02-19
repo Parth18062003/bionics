@@ -16,6 +16,7 @@ export default function ApprovalDetailPage() {
   const [loading, setLoading]           = useState(true);
   const [error, setError]               = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [decisionReason, setDecisionReason] = useState('');
 
   useEffect(() => {
     loadApproval();
@@ -37,9 +38,10 @@ export default function ApprovalDetailPage() {
   async function handleApprove() {
     setActionLoading(true);
     try {
-      const reason = prompt('Approval reason (optional):');
+      const reason = decisionReason.trim();
       const res    = await approveRequest(approvalId, { reason: reason || undefined });
       setApproval(res);
+      setDecisionReason('');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to approve');
     } finally {
@@ -50,10 +52,14 @@ export default function ApprovalDetailPage() {
   async function handleReject() {
     setActionLoading(true);
     try {
-      const reason = prompt('Rejection reason:');
-      if (!reason) { setActionLoading(false); return; }
+      const reason = decisionReason.trim();
+      if (!reason) {
+        setError('Rejection reason is required.');
+        return;
+      }
       const res = await rejectRequest(approvalId, { reason });
       setApproval(res);
+      setDecisionReason('');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to reject');
     } finally {
@@ -183,29 +189,46 @@ export default function ApprovalDetailPage() {
 
       {/* ── Action buttons (only when still pending) ── */}
       {isPending && (
-        <div className="flex items-center gap-md">
-          <button
-            className="btn btn-success"
-            disabled={actionLoading}
-            onClick={handleApprove}
-            aria-label="Approve this request"
-          >
-            {actionLoading ? (
-              <div className="loading-spinner" style={{ width: 16, height: 16 }} aria-hidden="true" />
-            ) : (
-              <span aria-hidden="true">✓</span>
-            )}
-            Approve
-          </button>
-          <button
-            className="btn btn-danger"
-            disabled={actionLoading}
-            onClick={handleReject}
-            aria-label="Reject this request"
-          >
-            <span aria-hidden="true">✕</span>
-            Reject
-          </button>
+        <div className="card">
+          <div className="form-group" style={{ marginBottom: 'var(--space-md)' }}>
+            <label htmlFor="approval-decision-reason" className="form-label">
+              Decision Reason (required for reject)
+            </label>
+            <input
+              id="approval-decision-reason"
+              type="text"
+              className="form-input"
+              placeholder="Add context for the audit trail"
+              value={decisionReason}
+              onChange={(e) => setDecisionReason(e.target.value)}
+              disabled={actionLoading}
+            />
+          </div>
+
+          <div className="flex items-center gap-md">
+            <button
+              className="btn btn-success"
+              disabled={actionLoading}
+              onClick={handleApprove}
+              aria-label="Approve this request"
+            >
+              {actionLoading ? (
+                <div className="loading-spinner" style={{ width: 16, height: 16 }} aria-hidden="true" />
+              ) : (
+                <span aria-hidden="true">✓</span>
+              )}
+              Approve
+            </button>
+            <button
+              className="btn btn-danger"
+              disabled={actionLoading}
+              onClick={handleReject}
+              aria-label="Reject this request"
+            >
+              <span aria-hidden="true">✕</span>
+              Reject
+            </button>
+          </div>
         </div>
       )}
     </div>

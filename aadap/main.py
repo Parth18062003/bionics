@@ -25,6 +25,7 @@ from aadap.api.routes import (
     marketplace_router,
     tasks_router,
 )
+from aadap.api.routes.explorer import router as explorer_router
 from aadap.core.config import get_settings
 from aadap.core.logging import configure_logging, get_logger
 from aadap.core.middleware import CorrelationMiddleware
@@ -92,6 +93,7 @@ def create_app() -> FastAPI:
     application.include_router(artifacts_router)
     application.include_router(marketplace_router)
     application.include_router(execution_router)
+    application.include_router(explorer_router)
 
     return application
 

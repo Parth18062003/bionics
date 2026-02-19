@@ -119,6 +119,25 @@ class TestCapabilityAgentFactory:
         )
         assert agent is None
 
+    def test_capability_agents_receive_adapter_by_default(self, service: ExecutionService):
+        agent = service._get_capability_agent(
+            task_type="ingestion",
+            platform="databricks",
+            environment="SANDBOX",
+        )
+        assert agent is not None
+        assert getattr(agent, "_platform_adapter", None) is not None
+
+    def test_generate_only_mode_disables_adapter(self, service: ExecutionService):
+        agent = service._get_capability_agent(
+            task_type="ingestion",
+            platform="databricks",
+            environment="SANDBOX",
+            generate_only=True,
+        )
+        assert agent is not None
+        assert getattr(agent, "_platform_adapter", None) is None
+
 
 class TestExecuteTaskPhase8:
     @pytest.mark.asyncio
@@ -141,6 +160,8 @@ class TestExecuteTaskPhase8:
         service._transition = AsyncMock(side_effect=record_transition)
         service._classify_task_type = MagicMock(return_value="developer")
         service._generate_code = AsyncMock(return_value="print('generated')")
+        service._set_task_metadata = AsyncMock(return_value=None)
+        service._persist_approval_request = AsyncMock(return_value=None)
         service._store_artifact = AsyncMock(return_value=uuid.uuid4())
         service._execute_on_databricks = AsyncMock(return_value={
             "status": "SUCCESS",
@@ -195,6 +216,8 @@ class TestExecuteTaskPhase8:
         ))
         service._persist_capability_artifacts = AsyncMock(return_value=None)
         service._generate_code = AsyncMock(return_value="print('fallback')")
+        service._set_task_metadata = AsyncMock(return_value=None)
+        service._persist_approval_request = AsyncMock(return_value=None)
         service._store_artifact = AsyncMock(return_value=uuid.uuid4())
         service._run_optimization_phase = AsyncMock(return_value=(
             "print('optimized')",
@@ -248,6 +271,8 @@ class TestExecuteTaskPhase8:
             [{"type": "job_config", "content": {"x": 1}}],
         ))
         service._persist_capability_artifacts = AsyncMock(return_value=None)
+        service._set_task_metadata = AsyncMock(return_value=None)
+        service._persist_approval_request = AsyncMock(return_value=None)
         service._store_artifact = AsyncMock(return_value=uuid.uuid4())
         service._run_optimization_phase = AsyncMock(return_value=(
             "CREATE TABLE t (id INT)",
@@ -268,3 +293,79 @@ class TestExecuteTaskPhase8:
         assert result["status"] == "APPROVAL_PENDING"
         assert (TaskState.IN_OPTIMIZATION, TaskState.OPTIMIZED) in transitions
         assert (TaskState.OPTIMIZED, TaskState.APPROVAL_PENDING) in transitions
+
+
+class TestInvariantEnforcement:
+    @pytest.mark.asyncio
+    async def test_resume_after_approval_requires_decision_explanation(
+        self,
+        service: ExecutionService,
+    ):
+        task = _task(
+            title="Resume deployment",
+            description="Requires approval",
+            metadata_={"approval_id": str(uuid.uuid4())},
+        )
+        task.current_state = TaskState.APPROVAL_PENDING.value
+
+        with pytest.raises(RuntimeError, match="INV-09"):
+            await service._resume_after_approval(cast(Task, task))
+
+
+class TestExecutionServiceFactory:
+    def test_create_fails_when_required_config_missing(self, monkeypatch):
+        import aadap.services.execution as execution_mod
+
+        monkeypatch.setattr(
+            execution_mod,
+            "get_settings",
+            lambda: SimpleNamespace(
+                azure_openai_api_key=None,
+                azure_openai_endpoint=None,
+                azure_openai_deployment_name=None,
+                databricks_host=None,
+                fabric_tenant_id=None,
+                fabric_client_id=None,
+                fabric_client_secret=None,
+                fabric_workspace_id=None,
+            ),
+        )
+
+        with pytest.raises(RuntimeError, match="Missing"):
+            ExecutionService.create()
+
+    def test_create_uses_real_clients_when_config_present(self, monkeypatch):
+        import aadap.services.execution as execution_mod
+
+        monkeypatch.setattr(
+            execution_mod,
+            "get_settings",
+            lambda: SimpleNamespace(
+                azure_openai_api_key="set",
+                azure_openai_endpoint="https://example.openai.azure.com",
+                azure_openai_deployment_name="gpt-4o",
+                databricks_host="https://adb.example.com",
+                fabric_tenant_id="tenant",
+                fabric_client_id="client",
+                fabric_client_secret="secret",
+                fabric_workspace_id="workspace",
+            ),
+        )
+        monkeypatch.setattr(
+            execution_mod.AzureOpenAIClient,
+            "from_settings",
+            classmethod(lambda cls: MockLLMClient(default_response="ok")),
+        )
+        monkeypatch.setattr(
+            execution_mod.DatabricksClient,
+            "from_settings",
+            classmethod(lambda cls: MockDatabricksClient()),
+        )
+        monkeypatch.setattr(
+            execution_mod.FabricClient,
+            "from_settings",
+            classmethod(lambda cls: MockFabricClient()),
+        )
+
+        service = ExecutionService.create()
+        assert isinstance(service, ExecutionService)

@@ -11,6 +11,7 @@ export default function ApprovalsPage() {
   const [loading, setLoading]           = useState(true);
   const [error, setError]               = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [decisionReason, setDecisionReason] = useState<Record<string, string>>({});
 
   useEffect(() => {
     loadApprovals();
@@ -33,9 +34,10 @@ export default function ApprovalsPage() {
   async function handleApprove(id: string) {
     setActionLoading(id);
     try {
-      const reason = prompt('Approval reason (optional):');
+      const reason = decisionReason[id]?.trim();
       await approveRequest(id, { reason: reason || undefined });
       await loadApprovals();
+      setDecisionReason((prev) => ({ ...prev, [id]: '' }));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to approve';
       setError(msg);
@@ -47,10 +49,14 @@ export default function ApprovalsPage() {
   async function handleReject(id: string) {
     setActionLoading(id);
     try {
-      const reason = prompt('Rejection reason:');
-      if (!reason) { setActionLoading(null); return; }
+      const reason = decisionReason[id]?.trim();
+      if (!reason) {
+        setError('Rejection reason is required.');
+        return;
+      }
       await rejectRequest(id, { reason });
       await loadApprovals();
+      setDecisionReason((prev) => ({ ...prev, [id]: '' }));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to reject';
       setError(msg);
@@ -192,6 +198,26 @@ export default function ApprovalsPage() {
                 )}
 
                 {/* Actions */}
+                <div className="form-group" style={{ marginBottom: 'var(--space-md)' }}>
+                  <label htmlFor={`reason-${approval.id}`} className="form-label">
+                    Decision Reason (required for reject)
+                  </label>
+                  <input
+                    id={`reason-${approval.id}`}
+                    type="text"
+                    className="form-input"
+                    placeholder="Add context for the audit trail"
+                    value={decisionReason[approval.id] ?? ''}
+                    onChange={(e) =>
+                      setDecisionReason((prev) => ({
+                        ...prev,
+                        [approval.id]: e.target.value,
+                      }))
+                    }
+                    disabled={isActioning}
+                  />
+                </div>
+
                 <div className="flex items-center gap-md">
                   <button
                     className="btn btn-success"

@@ -3,15 +3,15 @@
 import { Suspense, useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createTask, getMarketplaceAgent } from '@/api/client';
-import type { AgentCatalogEntry } from '@/api/types';
+import type { AgentCatalogEntry, TaskCreateRequest } from '@/api/types';
 import { ErrorBanner, LoadingPage, PageHeader } from '@/components/ui';
 import { clamp } from '@/lib/utils';
 
 /** Derive the capability category from the marketplace agent ID. */
-function agentCapability(id: string): 'ingestion' | 'pipeline' | 'scheduler' | 'catalog' | null {
+function agentCapability(id: string): 'ingestion' | 'etl_pipeline' | 'job_scheduler' | 'catalog' | null {
   if (id.startsWith('ingestion')) return 'ingestion';
-  if (id.startsWith('pipeline'))  return 'pipeline';
-  if (id.startsWith('scheduler')) return 'scheduler';
+  if (id.startsWith('etl'))       return 'etl_pipeline';
+  if (id.startsWith('scheduler')) return 'job_scheduler';
   if (id.startsWith('catalog'))   return 'catalog';
   return null;
 }
@@ -64,31 +64,39 @@ function NewTaskForm() {
     setError(null);
 
     try {
-      // Build an enhanced description that embeds capability config as a
-      // structured JSON block so the assigned agent can consume it.
       const cap = agent ? agentCapability(agent.id) : null;
-      let enhancedDescription = description.trim();
-
+      let capabilityConfig: TaskCreateRequest['capability_config'];
       if (cap === 'ingestion') {
-        const cfg = { source_type: sourceType, target_type: targetType, ingestion_mode: ingestionMode };
-        enhancedDescription += `\n\n### Ingestion Configuration\n\`\`\`json\n${JSON.stringify(cfg, null, 2)}\n\`\`\``;
-      } else if (cap === 'pipeline') {
-        const cfg = { pipeline_type: pipelineType };
-        enhancedDescription += `\n\n### Pipeline Configuration\n\`\`\`json\n${JSON.stringify(cfg, null, 2)}\n\`\`\``;
-      } else if (cap === 'scheduler') {
-        const cfg: Record<string, unknown> = { job_type: jobType };
-        if (cronExpression.trim()) cfg.schedule = { cron_expression: cronExpression.trim(), timezone: scheduleTz };
-        enhancedDescription += `\n\n### Job Configuration\n\`\`\`json\n${JSON.stringify(cfg, null, 2)}\n\`\`\``;
+        capabilityConfig = {
+          source_type: sourceType,
+          target_type: targetType,
+          ingestion_mode: ingestionMode,
+        };
+      } else if (cap === 'etl_pipeline') {
+        capabilityConfig = {
+          pipeline_type: pipelineType,
+          transformations: [],
+        };
+      } else if (cap === 'job_scheduler') {
+        capabilityConfig = { job_type: jobType };
+        if (cronExpression.trim()) {
+          capabilityConfig.schedule = {
+            cron_expression: cronExpression.trim(),
+            timezone: scheduleTz,
+          };
+        }
       }
 
       const task = await createTask({
         title:        title.trim(),
-        description:  enhancedDescription || undefined,
+        description:  description.trim() || undefined,
         priority,
         environment,
         agent_type:   agent?.id,
+        capability_id: cap ?? undefined,
         language:     selectedLanguage || agent?.languages[0],
         auto_execute: autoExecute,
+        capability_config: capabilityConfig,
       });
       router.push(`/tasks/${task.id}`);
     } catch (err: unknown) {
@@ -326,7 +334,7 @@ function NewTaskForm() {
             </div>
           )}
 
-          {agent && agentCapability(agent.id) === 'pipeline' && (
+          {agent && agentCapability(agent.id) === 'etl_pipeline' && (
             <div
               className="card"
               style={{ padding: 'var(--space-lg)', borderLeft: '3px solid var(--color-accent)' }}
@@ -353,7 +361,7 @@ function NewTaskForm() {
             </div>
           )}
 
-          {agent && agentCapability(agent.id) === 'scheduler' && (
+          {agent && agentCapability(agent.id) === 'job_scheduler' && (
             <div
               className="card"
               style={{ padding: 'var(--space-lg)', borderLeft: '3px solid var(--color-accent)' }}

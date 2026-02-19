@@ -248,6 +248,10 @@ class ApprovalRequest(Base):
     requested_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
     decided_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
     decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    risk_level: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="NONE",
+        comment="NONE | LOW | MEDIUM | HIGH | CRITICAL",
+    )
     explanation_artifact_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("artifacts.id"), nullable=True,
         comment="INV-09: DecisionExplanation artifact",
@@ -361,4 +365,59 @@ class AuditEvent(Base):
         Index("ix_audit_task_id", "task_id"),
         Index("ix_audit_event_type", "event_type"),
         Index("ix_audit_created_at", "created_at"),
+    )
+
+
+# ── PlatformResource ────────────────────────────────────────────────────
+
+class PlatformResource(Base):
+    """
+    Resources created by platform adapters (pipelines, jobs, tables, shortcuts).
+
+    Provides persistence for adapter metadata, ensuring resources can be
+    tracked across service restarts.
+    """
+
+    __tablename__ = "platform_resources"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    platform: Mapped[str] = mapped_column(
+        String(32), nullable=False,
+        comment="databricks or fabric",
+    )
+    resource_type: Mapped[str] = mapped_column(
+        String(64), nullable=False,
+        comment="pipeline, job, table, shortcut",
+    )
+    platform_resource_id: Mapped[str] = mapped_column(
+        String(256), nullable=False,
+        comment="ID assigned by the platform",
+    )
+    definition: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=True,
+        comment="Full resource definition/configuration",
+    )
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="CREATED",
+        comment="CREATED | QUEUED | RUNNING | COMPLETED | FAILED",
+    )
+    metadata_: Mapped[dict | None] = mapped_column(
+        "metadata", JSONB, nullable=True, default=dict
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+    __table_args__ = (
+        Index("ix_platform_resources_task_id", "task_id"),
+        Index("ix_platform_resources_platform", "platform"),
+        Index("ix_platform_resources_type", "resource_type"),
     )

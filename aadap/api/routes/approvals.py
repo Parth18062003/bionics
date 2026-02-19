@@ -21,28 +21,35 @@ Usage:
 
 from __future__ import annotations
 
+import inspect
 import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from aadap.api.deps import get_correlation_id, get_current_user
+from aadap.api.deps import get_correlation_id, get_current_user, get_session
 from aadap.core.logging import get_logger
+from aadap.db.models import ApprovalRequest
+from aadap.orchestrator.graph import transition as orchestrator_transition
+from aadap.orchestrator.state_machine import InvalidTransitionError
 from aadap.safety.approval_engine import (
     ApprovalEngine,
     ApprovalRecord,
     ApprovalRejectedError,
     ApprovalRequiredError,
     ApprovalStatus,
+    get_approval_engine as get_shared_approval_engine,
 )
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/approvals", tags=["approvals"])
 
-# Module-level engine instance (in production, backed by DB)
-_approval_engine = ApprovalEngine()
+# Module-level engine instance (shared with execution service)
+_approval_engine = get_shared_approval_engine()
 
 
 def get_approval_engine() -> ApprovalEngine:
@@ -121,6 +128,7 @@ async def approve(
     engine: ApprovalEngine = Depends(get_approval_engine),
     current_user: str = Depends(get_current_user),
     correlation_id: str | None = Depends(get_correlation_id),
+    session: AsyncSession = Depends(get_session),
 ) -> ApprovalResponse:
     """
     Approve a pending approval request.
@@ -144,6 +152,22 @@ async def approve(
         decided_by=current_user,
         correlation_id=correlation_id,
     )
+
+    persisted = await _sync_approval_row(
+        session=session,
+        approval_id=approval_id,
+        status="APPROVED",
+        decided_by=current_user,
+        reason=body.reason,
+    )
+    if persisted:
+        await _advance_task_for_decision(
+            task_id=record.task_id,
+            approved=True,
+            decided_by=current_user,
+            reason=body.reason,
+        )
+
     return _record_to_response(record)
 
 
@@ -159,6 +183,7 @@ async def reject(
     engine: ApprovalEngine = Depends(get_approval_engine),
     current_user: str = Depends(get_current_user),
     correlation_id: str | None = Depends(get_correlation_id),
+    session: AsyncSession = Depends(get_session),
 ) -> ApprovalResponse:
     """
     Reject a pending approval request.
@@ -182,6 +207,22 @@ async def reject(
         decided_by=current_user,
         correlation_id=correlation_id,
     )
+
+    persisted = await _sync_approval_row(
+        session=session,
+        approval_id=approval_id,
+        status="REJECTED",
+        decided_by=current_user,
+        reason=body.reason,
+    )
+    if persisted:
+        await _advance_task_for_decision(
+            task_id=record.task_id,
+            approved=False,
+            decided_by=current_user,
+            reason=body.reason,
+        )
+
     return _record_to_response(record)
 
 
@@ -195,11 +236,72 @@ def _record_to_response(record: ApprovalRecord) -> ApprovalResponse:
         task_id=str(record.task_id),
         operation_type=record.operation_type,
         environment=record.environment,
-        status=record.status.value if isinstance(record.status, ApprovalStatus) else record.status,
+        status=record.status.value if isinstance(
+            record.status, ApprovalStatus) else record.status,
         requested_by=record.requested_by,
         decided_by=record.decided_by,
         decision_reason=record.decision_reason,
-        risk_level=record.risk_level.value if hasattr(record.risk_level, "value") else str(record.risk_level),
+        risk_level=record.risk_level.value if hasattr(
+            record.risk_level, "value") else str(record.risk_level),
         created_at=record.created_at.isoformat() if record.created_at else "",
         decided_at=record.decided_at.isoformat() if record.decided_at else None,
     )
+
+
+async def _sync_approval_row(
+    session: AsyncSession,
+    approval_id: uuid.UUID,
+    status: str,
+    decided_by: str,
+    reason: str | None,
+) -> bool:
+    """Update persisted approval row when present (no-op if not persisted)."""
+    result = await session.execute(
+        select(ApprovalRequest).where(ApprovalRequest.id == approval_id)
+    )
+    row_getter = getattr(result, "scalar_one_or_none", None)
+    row = row_getter() if callable(row_getter) else None
+    if inspect.isawaitable(row):
+        row = await row
+    if not isinstance(row, ApprovalRequest):
+        return False
+
+    await session.execute(
+        update(ApprovalRequest)
+        .where(ApprovalRequest.id == approval_id)
+        .values(
+            status=status,
+            decided_by=decided_by,
+            decision_reason=reason,
+        )
+    )
+    return True
+
+
+async def _advance_task_for_decision(
+    task_id: uuid.UUID,
+    approved: bool,
+    decided_by: str,
+    reason: str | None,
+) -> None:
+    """Apply approval decision side-effects in task state machine."""
+    try:
+        await orchestrator_transition(
+            task_id=task_id,
+            next_state="IN_REVIEW",
+            triggered_by=decided_by,
+            reason=reason or "Approval decision review step",
+        )
+    except InvalidTransitionError:
+        pass
+
+    final_state = "APPROVED" if approved else "REJECTED"
+    try:
+        await orchestrator_transition(
+            task_id=task_id,
+            next_state=final_state,
+            triggered_by=decided_by,
+            reason=reason or f"Decision: {final_state}",
+        )
+    except InvalidTransitionError:
+        pass
