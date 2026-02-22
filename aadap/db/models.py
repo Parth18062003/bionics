@@ -188,6 +188,9 @@ class Artifact(Base):
 
     INV-09: Approval-required transitions must produce a
     DecisionExplanation artifact.
+
+    EDIT-01: Artifact has version number that increments on save.
+    EDIT-04: User can save edited code as a new version.
     """
 
     __tablename__ = "artifacts"
@@ -211,6 +214,18 @@ class Artifact(Base):
         String(1024), nullable=True,
         comment="Blob storage URI for large artifacts (Tier 3)",
     )
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1,
+        comment="Version number, increments on each save",
+    )
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("artifacts.id", ondelete="SET NULL"), nullable=True,
+        comment="Parent artifact for version lineage",
+    )
+    edit_message: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="Optional message describing this version's changes",
+    )
     metadata_: Mapped[dict | None] = mapped_column(
         "metadata", JSONB, nullable=True, default=dict
     )
@@ -219,10 +234,14 @@ class Artifact(Base):
     )
 
     task: Mapped["Task"] = relationship(back_populates="artifacts")
+    parent: Mapped["Artifact | None"] = relationship(
+        "Artifact", remote_side=[id], backref="children"
+    )
 
     __table_args__ = (
         Index("ix_artifacts_task_id", "task_id"),
         Index("ix_artifacts_type", "artifact_type"),
+        Index("ix_artifacts_task_version", "task_id", "version"),
     )
 
 
