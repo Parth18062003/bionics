@@ -75,8 +75,9 @@ Each task was committed atomically:
 3. **Task 3: Create EditorToolbar component** - `4faa5e4` (feat)
 4. **Task 4: Add API client methods for version management** - `0b7aaf3` (feat)
 5. **Task 5: Fix Monaco Editor integration** - `6a1df56` (fix)
+6. **Post-checkpoint fix: Artifact type mismatch** - `75e84d4` (fix)
 
-**Plan metadata:** (to be committed)
+**Plan metadata commit:** `de8a3bd` (docs)
 
 ## Files Created/Modified
 - `frontend/src/components/editor/MonacoEditor.tsx` - Lazy-loaded Monaco editor with custom dark theme
@@ -112,10 +113,23 @@ Each task was committed atomically:
 - **Verification:** TypeScript compiles without errors, frontend dev server starts
 - **Committed in:** `6a1df56`
 
+**2. [Rule 1 - Bug] Monaco editor not rendering due to artifact type mismatch**
+- **Found during:** Post-checkpoint testing
+- **Issue:** Artifact type field from API (`type`) was not being matched correctly against the list of code artifact types (`source_code`, `notebook`, `pipeline_definition`, etc.), causing Monaco editor to never render.
+- **Fix:** Corrected the type checking logic in the artifact page to properly identify code artifacts
+- **Files modified:** `frontend/src/app/artifacts/[taskId]/[id]/page.tsx`
+- **Committed in:** `75e84d4`
+
 ---
 
-**Total deviations:** 1 auto-fixed (bug - integration issue)
-**Impact on plan:** Critical fix - the Monaco components were created but never integrated. The page now properly uses the editor components for code artifacts.
+**Total deviations:** 2 auto-fixed (bugs - integration issues)
+**Impact on plan:** Critical fixes - the Monaco components were created but not properly integrated and had type matching issues.
+
+## User Feedback
+
+**Checkpoint approval:** Approved with minor issues noted
+- User comment: "some issues but I will approve it for now to move to next phases"
+- Outstanding issues to address in future iterations
 
 ## Issues Encountered
 - Type mismatch between API's `ArtifactVersionSummary.edit_message` (can be null) and editor component's type (undefined only) - resolved with null coalescing operator
