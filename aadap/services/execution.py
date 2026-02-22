@@ -67,6 +67,13 @@ from aadap.safety.approval_engine import (
     get_approval_engine,
 )
 from aadap.safety.static_analysis import StaticAnalyzer
+from aadap.core.exceptions import (
+    AADAPError,
+    ExecutionError,
+    OrchestratorError,
+    AgentLifecycleError,
+    IntegrationError,
+)
 
 logger = get_logger(__name__)
 
@@ -530,9 +537,34 @@ class ExecutionService:
                 "task_type": task_type,
             }
 
-        except Exception as exc:
+        except (ExecutionError, OrchestratorError, AgentLifecycleError) as exc:
             logger.error(
                 "execution.error",
+                task_id=str(task_id),
+                error_code=exc.error_code,
+                severity=exc.severity.value,
+                error=str(exc),
+            )
+            # Try to transition to CANCELLED or DEV_FAILED if possible
+            try:
+                current = await self._event_store.replay(task_id)
+                allowed = TaskStateMachine.get_allowed_transitions(current)
+                if TaskState.CANCELLED in allowed:
+                    await self._transition(task_id, current, TaskState.CANCELLED)
+                elif TaskState.DEV_FAILED in allowed:
+                    await self._transition(task_id, current, TaskState.DEV_FAILED)
+            except Exception:
+                logger.debug("execution.cleanup_failed", task_id=str(task_id))
+                pass  # Best effort - state may already be terminal
+            return {
+                "task_id": str(task_id),
+                "status": "FAILED",
+                "error_code": exc.error_code,
+                "error": str(exc),
+            }
+        except Exception as exc:
+            logger.exception(
+                "execution.unexpected_error",
                 task_id=str(task_id),
                 error=str(exc),
             )
@@ -545,7 +577,8 @@ class ExecutionService:
                 elif TaskState.DEV_FAILED in allowed:
                     await self._transition(task_id, current, TaskState.DEV_FAILED)
             except Exception:
-                pass  # Best effort
+                logger.debug("execution.cleanup_failed", task_id=str(task_id))
+                pass  # Best effort - state may already be terminal
             return {
                 "task_id": str(task_id),
                 "status": "FAILED",
@@ -1025,9 +1058,26 @@ class ExecutionService:
                 "operation_type": operation_type.value if operation_type else None,
             }
             
-        except Exception as exc:
+        except (IntegrationError, ExecutionError) as exc:
             logger.error(
                 "execution.direct_error",
+                task_id=str(task.id),
+                error_code=exc.error_code,
+                severity=exc.severity.value,
+                error=str(exc),
+            )
+            current = await self._event_store.replay(task.id)
+            if TaskState.DEV_FAILED in TaskStateMachine.get_allowed_transitions(current):
+                await self._transition(task.id, current, TaskState.DEV_FAILED)
+            return {
+                "task_id": str(task.id),
+                "status": "FAILED",
+                "error_code": exc.error_code,
+                "error": str(exc),
+            }
+        except Exception as exc:
+            logger.exception(
+                "execution.direct_unexpected_error",
                 task_id=str(task.id),
                 error=str(exc),
             )
@@ -1232,7 +1282,25 @@ class ExecutionService:
         try:
             await optimization_agent.accept_task(context)
             result = await optimization_agent.execute(context)
+        except AgentLifecycleError as exc:
+            logger.warning(
+                "execution.optimization_agent_error",
+                task_id=str(task.id),
+                error_code=exc.error_code,
+                error=str(exc),
+            )
+            return code, {
+                "applied": False,
+                "reason": f"Optimization agent error: {exc}",
+                "error_code": exc.error_code,
+                "platform": platform,
+            }
         except Exception as exc:  # pragma: no cover
+            logger.warning(
+                "execution.optimization_unexpected_error",
+                task_id=str(task.id),
+                error=str(exc),
+            )
             return code, {
                 "applied": False,
                 "reason": f"Optimization failed: {exc}",
@@ -1443,7 +1511,7 @@ class ExecutionService:
                 "duration_ms": job_result.duration_ms,
             }
 
-        except Exception as exc:
+        except IntegrationError as exc:
             # Update execution as FAILED
             async with get_db_session() as session:
                 from sqlalchemy import update
@@ -1458,6 +1526,34 @@ class ExecutionService:
                 )
             logger.error(
                 "execution.databricks_error",
+                task_id=str(task_id),
+                error_code=exc.error_code,
+                severity=exc.severity.value,
+                error=str(exc),
+            )
+            return {
+                "status": "FAILED",
+                "error_code": exc.error_code,
+                "error": str(exc),
+                "output": None,
+                "job_id": None,
+                "duration_ms": None,
+            }
+        except Exception as exc:
+            # Update execution as FAILED
+            async with get_db_session() as session:
+                from sqlalchemy import update
+                await session.execute(
+                    update(Execution)
+                    .where(Execution.id == execution_id)
+                    .values(
+                        status="FAILED",
+                        error=str(exc),
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                )
+            logger.exception(
+                "execution.databricks_unexpected_error",
                 task_id=str(task_id),
                 error=str(exc),
             )
@@ -1557,7 +1653,7 @@ class ExecutionService:
                 "duration_ms": job_result.duration_ms,
             }
 
-        except Exception as exc:
+        except IntegrationError as exc:
             # Update execution as FAILED
             async with get_db_session() as session:
                 from sqlalchemy import update
@@ -1572,6 +1668,34 @@ class ExecutionService:
                 )
             logger.error(
                 "execution.fabric_error",
+                task_id=str(task_id),
+                error_code=exc.error_code,
+                severity=exc.severity.value,
+                error=str(exc),
+            )
+            return {
+                "status": "FAILED",
+                "error_code": exc.error_code,
+                "error": str(exc),
+                "output": None,
+                "job_id": None,
+                "duration_ms": None,
+            }
+        except Exception as exc:
+            # Update execution as FAILED
+            async with get_db_session() as session:
+                from sqlalchemy import update
+                await session.execute(
+                    update(Execution)
+                    .where(Execution.id == execution_id)
+                    .values(
+                        status="FAILED",
+                        error=str(exc),
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                )
+            logger.exception(
+                "execution.fabric_unexpected_error",
                 task_id=str(task_id),
                 error=str(exc),
             )
