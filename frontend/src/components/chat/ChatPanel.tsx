@@ -2,11 +2,13 @@
  * AADAP — ChatPanel Component
  * ==============================
  * Slide-out chat panel accessible from any page.
+ * Uses CSS variables for consistent theming.
  */
 
 'use client';
 
 import { useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { useChat } from '@/hooks/useChat';
 import { ChatMessage } from '@/components/chat/ChatMessage';
 import { ChatInput } from '@/components/chat/ChatInput';
@@ -56,34 +58,107 @@ export function ChatPanel({ isOpen, onClose }: ChatPanelProps) {
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/20 dark:bg-black/40 z-40 md:hidden"
         onClick={onClose}
+        style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'var(--color-bg-overlay)',
+          zIndex: 40,
+        }}
       />
 
       {/* Panel */}
-      <div className="fixed right-0 top-0 h-full w-full md:w-96 bg-white dark:bg-gray-900 shadow-xl z-50 flex flex-col">
+      <div
+        style={{
+          position: 'fixed',
+          right: 0,
+          top: 0,
+          height: '100%',
+          width: '380px',
+          maxWidth: '100vw',
+          background: 'var(--color-bg-card)',
+          boxShadow: 'var(--shadow-lg)',
+          zIndex: 50,
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
         {/* Header */}
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            Quick Chat
-          </h2>
+        <div
+          style={{
+            padding: 'var(--space-lg)',
+            borderBottom: '1px solid var(--color-border)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>
+            <div
+              style={{
+                width: '32px',
+                height: '32px',
+                background: 'linear-gradient(135deg, var(--color-accent), #a78bfa)',
+                borderRadius: 'var(--radius-sm)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '14px',
+                fontWeight: 800,
+                color: '#fff',
+              }}
+            >
+              AI
+            </div>
+            <h2
+              style={{
+                fontSize: 'var(--font-size-lg)',
+                fontWeight: 600,
+                color: 'var(--color-text-primary)',
+              }}
+            >
+              Quick Chat
+            </h2>
+          </div>
           <button
             onClick={onClose}
-            className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            style={{
+              padding: 'var(--space-sm)',
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--color-text-secondary)',
+              cursor: 'pointer',
+              borderRadius: 'var(--radius-sm)',
+            }}
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6L6 18M6 6l12 12" />
             </svg>
           </button>
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 bg-gray-50 dark:bg-gray-950">
+        <div
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: 'var(--space-lg)',
+            background: 'var(--color-bg-secondary)',
+          }}
+        >
           {!session?.messages.length && !isLoading && (
-            <div className="text-center text-gray-500 dark:text-gray-400 mt-10">
-              <p className="text-sm">
-                Quick chat for simple questions.
-                Use the full chat page for complex tasks.
+            <div
+              style={{
+                textAlign: 'center',
+                color: 'var(--color-text-secondary)',
+                padding: 'var(--space-2xl) var(--space-lg)',
+              }}
+            >
+              <p style={{ fontSize: 'var(--font-size-sm)', marginBottom: 'var(--space-md)' }}>
+                Describe your task and I&apos;ll help you create it.
+              </p>
+              <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)' }}>
+                Use the full chat page for complex tasks with requirements editing.
               </p>
             </div>
           )}
@@ -91,18 +166,82 @@ export function ChatPanel({ isOpen, onClose }: ChatPanelProps) {
             <ChatMessage key={index} message={message} />
           ))}
           {isLoading && (
-            <div className="flex justify-start mb-4">
-              <div className="bg-gray-100 dark:bg-gray-800 rounded-lg px-4 py-3">
-                <div className="flex gap-1">
-                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'flex-start',
+                marginBottom: 'var(--space-lg)',
+              }}
+            >
+              <div
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: 'var(--radius-md)',
+                  background: 'linear-gradient(135deg, var(--color-accent), #a78bfa)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '14px',
+                  fontWeight: 800,
+                  color: '#fff',
+                  marginRight: 'var(--space-md)',
+                  flexShrink: 0,
+                }}
+              >
+                AI
+              </div>
+              <div
+                style={{
+                  background: 'var(--color-bg-card)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-lg)',
+                  padding: 'var(--space-md) var(--space-lg)',
+                }}
+              >
+                <div style={{ display: 'flex', gap: 'var(--space-xs)' }}>
+                  <span
+                    style={{
+                      width: '8px',
+                      height: '8px',
+                      background: 'var(--color-accent)',
+                      borderRadius: '50%',
+                      animation: 'bounce 1s infinite',
+                      animationDelay: '0ms',
+                    }}
+                  />
+                  <span
+                    style={{
+                      width: '8px',
+                      height: '8px',
+                      background: 'var(--color-accent)',
+                      borderRadius: '50%',
+                      animation: 'bounce 1s infinite',
+                      animationDelay: '150ms',
+                    }}
+                  />
+                  <span
+                    style={{
+                      width: '8px',
+                      height: '8px',
+                      background: 'var(--color-accent)',
+                      borderRadius: '50%',
+                      animation: 'bounce 1s infinite',
+                      animationDelay: '300ms',
+                    }}
+                  />
                 </div>
               </div>
             </div>
           )}
           {error && (
-            <div className="text-center text-red-500 py-2 text-sm">
+            <div
+              className="error-banner"
+              style={{
+                margin: 'var(--space-md) 0',
+                fontSize: 'var(--font-size-sm)',
+              }}
+            >
               {error}
             </div>
           )}
@@ -113,17 +252,26 @@ export function ChatPanel({ isOpen, onClose }: ChatPanelProps) {
         <ChatInput
           onSend={sendMessage}
           disabled={isLoading || !session}
-          placeholder="Ask a quick question..."
+          placeholder="Describe your task..."
         />
 
         {/* Link to full chat */}
-        <div className="p-2 border-t border-gray-200 dark:border-gray-700 text-center">
-          <a
+        <div
+          style={{
+            padding: 'var(--space-md)',
+            borderTop: '1px solid var(--color-border)',
+            textAlign: 'center',
+          }}
+        >
+          <Link
             href="/chat"
-            className="text-sm text-blue-600 hover:text-blue-700"
+            style={{
+              fontSize: 'var(--font-size-sm)',
+              color: 'var(--color-accent)',
+            }}
           >
             Open full chat →
-          </a>
+          </Link>
         </div>
       </div>
     </>

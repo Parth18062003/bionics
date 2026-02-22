@@ -2,6 +2,7 @@
  * AADAP — ChatInput Component
  * ==============================
  * Text input for chat messages with auto-resize.
+ * Uses CSS variables for consistent theming.
  */
 
 'use client';
@@ -42,36 +43,83 @@ export function ChatInput({ onSend, disabled = false, placeholder = 'Type your m
   };
 
   return (
-    <div className="flex items-end gap-2 p-4 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'flex-end',
+        gap: 'var(--space-md)',
+        padding: 'var(--space-lg)',
+        background: 'var(--color-bg-card)',
+        borderTop: '1px solid var(--color-border)',
+      }}
+    >
       <textarea
         ref={textareaRef}
-        className="flex-1 px-4 py-2 text-sm border border-gray-300 rounded-lg 
-                   resize-none focus:outline-none focus:ring-2 focus:ring-blue-500
-                   dark:bg-gray-800 dark:border-gray-600 dark:text-white"
+        style={{
+          flex: 1,
+          padding: 'var(--space-md) var(--space-lg)',
+          fontSize: 'var(--font-size-base)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-lg)',
+          resize: 'none',
+          background: 'var(--color-bg-input)',
+          color: 'var(--color-text-primary)',
+          fontFamily: 'var(--font-family)',
+          lineHeight: 1.5,
+          outline: 'none',
+          transition: 'border-color var(--transition-fast), box-shadow var(--transition-fast)',
+        }}
         rows={1}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
+        onFocus={(e) => {
+          e.target.style.borderColor = 'var(--color-border-focus)';
+          e.target.style.boxShadow = '0 0 0 3px var(--color-accent-muted)';
+        }}
+        onBlur={(e) => {
+          e.target.style.borderColor = 'var(--color-border)';
+          e.target.style.boxShadow = 'none';
+        }}
         placeholder={placeholder}
         disabled={disabled}
       />
       <button
         onClick={handleSubmit}
         disabled={disabled || !value.trim()}
-        className={`p-2 rounded-lg transition-colors ${
-          disabled || !value.trim()
-            ? 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
-            : 'bg-blue-600 text-white hover:bg-blue-700'
-        }`}
+        style={{
+          padding: 'var(--space-md) var(--space-lg)',
+          borderRadius: 'var(--radius-lg)',
+          border: 'none',
+          background: disabled || !value.trim()
+            ? 'var(--color-bg-tertiary)'
+            : 'var(--color-accent)',
+          color: disabled || !value.trim()
+            ? 'var(--color-text-tertiary)'
+            : '#fff',
+          cursor: disabled || !value.trim()
+            ? 'not-allowed'
+            : 'pointer',
+          transition: 'all var(--transition-fast)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          opacity: disabled || !value.trim() ? 0.5 : 1,
+        }}
         title="Send message"
       >
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-          />
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M22 2L11 13" />
+          <path d="M22 2L15 22L11 13L2 9L22 2Z" />
         </svg>
       </button>
     </div>

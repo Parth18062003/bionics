@@ -78,17 +78,20 @@ def _parse_levels(levels_str: str | None) -> list[str] | None:
 @router.get("", response_model=LogsListResponse)
 async def get_logs(
     task_id: uuid.UUID | None = Query(None, description="Filter by task ID"),
-    levels: str | None = Query(None, description="Filter by levels (comma-separated: DEBUG,INFO,WARNING,ERROR)"),
+    levels: str | None = Query(
+        None, description="Filter by levels (comma-separated: DEBUG,INFO,WARNING,ERROR)"),
     search: str | None = Query(None, description="Search in message content"),
     limit: int = Query(100, ge=1, le=1000, description="Max results"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
-    start_time: datetime | None = Query(None, description="Filter from this time (ISO format)"),
-    end_time: datetime | None = Query(None, description="Filter to this time (ISO format)"),
+    start_time: datetime | None = Query(
+        None, description="Filter from this time (ISO format)"),
+    end_time: datetime | None = Query(
+        None, description="Filter to this time (ISO format)"),
     db: AsyncSession = Depends(get_session),
 ) -> LogsListResponse:
     """
     Query logs with filters.
-    
+
     Supports:
     - Filter by task
     - Filter by multiple log levels
@@ -97,7 +100,7 @@ async def get_logs(
     - Pagination
     """
     service = get_log_service()
-    
+
     params = LogQueryParams(
         task_id=task_id,
         levels=_parse_levels(levels),
@@ -107,10 +110,10 @@ async def get_logs(
         start_time=start_time,
         end_time=end_time,
     )
-    
+
     logs = await service.get_logs(params, db)
     total = await service.get_log_count(params, db)
-    
+
     return LogsListResponse(
         logs=[_log_to_response(log) for log in logs],
         total=total,
@@ -126,16 +129,17 @@ async def get_logs_by_correlation(
 ) -> LogsListResponse:
     """
     Get all logs with the same correlation ID.
-    
+
     Useful for tracing related events across agents and services.
     """
     service = get_log_service()
-    
+
     logs = await service.get_logs_by_correlation(correlation_id, db)
-    
+
     if not logs:
-        raise HTTPException(status_code=404, detail="No logs found with this correlation ID")
-    
+        raise HTTPException(
+            status_code=404, detail="No logs found with this correlation ID")
+
     return LogsListResponse(
         logs=[_log_to_response(log) for log in logs],
         total=len(logs),
@@ -147,42 +151,44 @@ async def get_logs_by_correlation(
 @router.get("/export")
 async def export_logs(
     task_id: uuid.UUID | None = Query(None, description="Filter by task ID"),
-    levels: str | None = Query(None, description="Filter by levels (comma-separated)"),
+    levels: str | None = Query(
+        None, description="Filter by levels (comma-separated)"),
     search: str | None = Query(None, description="Search in message content"),
-    start_time: datetime | None = Query(None, description="Filter from this time"),
+    start_time: datetime | None = Query(
+        None, description="Filter from this time"),
     end_time: datetime | None = Query(None, description="Filter to this time"),
     format: str = Query("json", description="Export format: json or csv"),
     db: AsyncSession = Depends(get_session),
 ) -> StreamingResponse:
     """
     Export logs as JSON or CSV file.
-    
+
     Returns a file download with the exported data.
     """
     service = get_log_service()
-    
+
     params = LogQueryParams(
         task_id=task_id,
         levels=_parse_levels(levels),
         search=search,
-        limit=10000,  # Higher limit for export
+        limit=1000,  # Higher limit for export
         offset=0,
         start_time=start_time,
         end_time=end_time,
     )
-    
+
     content = await service.export_logs(params, format, db)
-    
+
     # Determine content type and filename
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     filename = f"logs-{ts}.{format}"
     content_type = "application/json" if format == "json" else "text/csv"
-    
+
     logger.info("logs_api.export_logs", format=format, filename=filename)
-    
+
     async def stream():
         yield content
-    
+
     return StreamingResponse(
         stream(),
         media_type=content_type,
@@ -208,20 +214,21 @@ async def get_task_logs(
 ) -> LogsListResponse:
     """
     Get recent logs for a specific task.
-    
+
     This is the minimal embedded view for task detail pages.
     No filtering or search - just recent logs for the task.
     """
     service = get_log_service()
-    
+
     logs = await service.get_recent_logs(task_id, limit, db)
-    
+
     # Get total count for this task
     params = LogQueryParams(task_id=task_id, limit=1, offset=0)
     total = await service.get_log_count(params, db)
-    
-    logger.debug("logs_api.get_task_logs", task_id=str(task_id), count=len(logs))
-    
+
+    logger.debug("logs_api.get_task_logs",
+                 task_id=str(task_id), count=len(logs))
+
     return LogsListResponse(
         logs=[_log_to_response(log) for log in logs],
         total=total,
