@@ -23,7 +23,9 @@ from aadap.api.routes import (
     artifacts_router,
     chat_router,
     execution_router,
+    logs_router,
     marketplace_router,
+    task_logs_router,
     tasks_router,
 )
 from aadap.api.routes.explorer import router as explorer_router
@@ -96,6 +98,8 @@ def create_app() -> FastAPI:
     application.include_router(execution_router)
     application.include_router(explorer_router)
     application.include_router(chat_router)
+    application.include_router(logs_router)
+    application.include_router(task_logs_router)
 
     return application
 

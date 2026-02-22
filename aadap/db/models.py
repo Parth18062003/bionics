@@ -458,6 +458,10 @@ class TaskLog(Base):
         String(64), nullable=True,
         comment="Links to HTTP request correlation ID",
     )
+    source: Mapped[str | None] = mapped_column(
+        String(128), nullable=True,
+        comment="Agent or service that emitted the log (e.g., 'orchestrator', 'developer-agent')",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

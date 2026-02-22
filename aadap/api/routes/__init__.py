@@ -10,6 +10,8 @@ from aadap.api.routes.artifacts import router as artifacts_router
 from aadap.api.routes.marketplace import router as marketplace_router
 from aadap.api.routes.execution import router as execution_router
 from aadap.api.routes.chat import router as chat_router
+from aadap.api.routes.logs import router as logs_router
+from aadap.api.routes.logs import task_logs_router
 
 __all__ = [
     "tasks_router",
@@ -18,4 +20,6 @@ __all__ = [
     "marketplace_router",
     "execution_router",
     "chat_router",
+    "logs_router",
+    "task_logs_router",
 ]
