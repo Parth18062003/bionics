@@ -18,6 +18,7 @@ Usage:
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import uuid
 from typing import Any
@@ -490,4 +491,192 @@ async def create_artifact_version(
         edit_message=new_artifact.edit_message,
         metadata=new_artifact.metadata_,
         created_at=new_artifact.created_at.isoformat() if new_artifact.created_at else "",
+    )
+
+
+# ── Diff Endpoint (EDIT-03) ───────────────────────────────────────────────
+
+
+def _compute_diff(from_content: str, to_content: str) -> tuple[list[DiffLine], dict[str, int]]:
+    """
+    Compute structured diff between two content strings.
+
+    Returns:
+        Tuple of (diff_lines, stats) where stats contains counts for
+        added, removed, and unchanged lines.
+    """
+    from_lines = from_content.splitlines(keepends=True) if from_content else []
+    to_lines = to_content.splitlines(keepends=True) if to_content else []
+
+    # Generate unified diff
+    diff = list(difflib.unified_diff(from_lines, to_lines, lineterm=""))
+
+    # Parse diff into structured format
+    diff_lines: list[DiffLine] = []
+    stats = {"added": 0, "removed": 0, "unchanged": 0}
+
+    old_line_num = 0
+    new_line_num = 0
+
+    for line in diff:
+        # Skip the header lines (@@ ... @@)
+        if line.startswith("@@"):
+            continue
+        # Skip file headers (---, +++)
+        if line.startswith("---") or line.startswith("+++"):
+            continue
+
+        content = line.rstrip("\n\r")
+
+        if line.startswith("+"):
+            # Added line
+            new_line_num += 1
+            diff_lines.append(DiffLine(
+                old_line=None,
+                new_line=new_line_num,
+                content=content[1:],  # Remove the + prefix
+                type="added",
+            ))
+            stats["added"] += 1
+        elif line.startswith("-"):
+            # Removed line
+            old_line_num += 1
+            diff_lines.append(DiffLine(
+                old_line=old_line_num,
+                new_line=None,
+                content=content[1:],  # Remove the - prefix
+                type="removed",
+            ))
+            stats["removed"] += 1
+        elif line.startswith(" "):
+            # Unchanged line
+            old_line_num += 1
+            new_line_num += 1
+            diff_lines.append(DiffLine(
+                old_line=old_line_num,
+                new_line=new_line_num,
+                content=content[1:],  # Remove the space prefix
+                type="unchanged",
+            ))
+            stats["unchanged"] += 1
+
+    return diff_lines, stats
+
+
+@router.get(
+    "/{artifact_id}/diff",
+    response_model=DiffResponse,
+    summary="Get diff between two artifact versions",
+)
+async def get_artifact_diff(
+    task_id: uuid.UUID,
+    artifact_id: uuid.UUID,
+    from_version: int = Query(..., description="Base version for comparison"),
+    to_version: int = Query(..., description="Version to compare against"),
+    session: AsyncSession = Depends(get_session),
+) -> DiffResponse:
+    """
+    Compute structured diff between two versions of an artifact.
+
+    Query params:
+    - from_version: int (required) - base version for comparison
+    - to_version: int (required) - version to compare against
+
+    Returns structured line-by-line diff with stats.
+    """
+    # First verify the artifact exists and belongs to this task
+    result = await session.execute(
+        select(Artifact).where(
+            Artifact.id == artifact_id,
+            Artifact.task_id == task_id,
+        )
+    )
+    artifact = result.scalar_one_or_none()
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="Artifact not found.")
+
+    # Find the root of the lineage
+    visited = {artifact.id}
+    current = artifact
+    while current.parent_id is not None:
+        if current.parent_id in visited:
+            break
+        result = await session.execute(
+            select(Artifact).where(Artifact.id == current.parent_id)
+        )
+        parent = result.scalar_one_or_none()
+        if parent is None:
+            break
+        visited.add(parent.id)
+        current = parent
+
+    root_id = current.id
+
+    # Collect all lineage IDs
+    lineage_ids = {root_id}
+    to_process = [root_id]
+
+    while to_process:
+        current_id = to_process.pop()
+        result = await session.execute(
+            select(Artifact).where(Artifact.parent_id == current_id)
+        )
+        children = result.scalars().all()
+        for child in children:
+            if child.id not in lineage_ids:
+                lineage_ids.add(child.id)
+                to_process.append(child.id)
+
+    # Fetch both versions
+    result = await session.execute(
+        select(Artifact).where(
+            Artifact.id.in_(lineage_ids),
+        )
+    )
+    all_versions = result.scalars().all()
+
+    from_artifact = None
+    to_artifact = None
+
+    for v in all_versions:
+        if v.version == from_version:
+            from_artifact = v
+        if v.version == to_version:
+            to_artifact = v
+
+    if from_artifact is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Version {from_version} not found in artifact lineage.",
+        )
+    if to_artifact is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Version {to_version} not found in artifact lineage.",
+        )
+
+    # Handle edge case: same version
+    if from_version == to_version:
+        return DiffResponse(
+            from_version=from_version,
+            to_version=to_version,
+            from_content=from_artifact.content,
+            to_content=to_artifact.content,
+            diff=[],
+            stats={"added": 0, "removed": 0, "unchanged": 0},
+        )
+
+    # Compute diff
+    from_content = from_artifact.content or ""
+    to_content = to_artifact.content or ""
+
+    diff_lines, stats = _compute_diff(from_content, to_content)
+
+    return DiffResponse(
+        from_version=from_version,
+        to_version=to_version,
+        from_content=from_content,
+        to_content=to_content,
+        diff=diff_lines,
+        stats=stats,
     )
