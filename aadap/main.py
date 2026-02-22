@@ -21,6 +21,7 @@ from aadap.api.health import router as health_router
 from aadap.api.routes import (
     approvals_router,
     artifacts_router,
+    chat_router,
     execution_router,
     marketplace_router,
     tasks_router,
@@ -94,6 +95,7 @@ def create_app() -> FastAPI:
     application.include_router(marketplace_router)
     application.include_router(execution_router)
     application.include_router(explorer_router)
+    application.include_router(chat_router)
 
     return application
 

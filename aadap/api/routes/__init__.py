@@ -9,6 +9,7 @@ from aadap.api.routes.approvals import router as approvals_router
 from aadap.api.routes.artifacts import router as artifacts_router
 from aadap.api.routes.marketplace import router as marketplace_router
 from aadap.api.routes.execution import router as execution_router
+from aadap.api.routes.chat import router as chat_router
 
 __all__ = [
     "tasks_router",
@@ -16,4 +17,5 @@ __all__ = [
     "artifacts_router",
     "marketplace_router",
     "execution_router",
+    "chat_router",
 ]
