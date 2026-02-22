@@ -13,8 +13,8 @@ This roadmap delivers 6 user-facing features to the AADAP platform: conversation
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Infrastructure & Exception Handling** - Database models and robust error handling foundation (completed 2026-02-22)
-- [ ] **Phase 2: Chatbot** - Conversational task creation with natural language
-- [ ] **Phase 3: Logging** - Real-time task logging and observability
+- [x] **Phase 2: Chatbot** - Conversational task creation with natural language (completed 2026-02-22)
+- [x] **Phase 3: Logging** - Real-time task logging and observability (completed 2026-02-22)
 - [x] **Phase 4: Code Editor** - View, edit, and version generated code (completed 2026-02-22)
 - [ ] **Phase 5: Agent Control** - Monitor and control agent behavior
 - [ ] **Phase 6: Cost Management** - Track, analyze, and budget LLM costs
@@ -51,8 +51,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Chat backend service with SSE streaming and requirement extraction
-- [ ] 02-02-PLAN.md — Chat frontend (dedicated page and slide-out panel)
+- [x] 02-01-PLAN.md — Chat backend service with SSE streaming and requirement extraction (completed 2026-02-22)
+- [x] 02-02-PLAN.md — Chat frontend (dedicated page and slide-out panel) (completed 2026-02-22)
 
 ### Phase 3: Logging
 **Goal**: Users can monitor and debug running tasks through comprehensive log visibility
@@ -66,8 +66,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 03-01: Log service with structured emissions and API endpoints
-- [ ] 03-02: Log viewer frontend (embedded and dedicated page)
+- [x] 03-01: Log service with structured emissions and API endpoints (completed 2026-02-22)
+- [x] 03-02: Log viewer frontend (embedded and dedicated page) (completed 2026-02-22)
 
 ### Phase 4: Code Editor
 **Goal**: Users can view, edit, and version generated code before deployment
@@ -137,8 +137,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Infrastructure & Exception Handling | 4/4 | Complete    | 2026-02-22 |
-| 2. Chatbot | 0/2 | Not started | - |
-| 3. Logging | 0/2 | Not started | - |
+| 2. Chatbot | 2/2 | Complete    | 2026-02-22 |
+| 3. Logging | 2/2 | Complete    | 2026-02-22 |
 | 4. Code Editor | 2/2 | Complete    | 2026-02-22 |
 | 5. Agent Control | 0/2 | Not started | - |
 | 6. Cost Management | 0/2 | Not started | - |
