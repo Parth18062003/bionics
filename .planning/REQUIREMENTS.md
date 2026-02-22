@@ -7,11 +7,11 @@
 
 ### INFRA - Infrastructure Foundation
 
-- [ ] **INFRA-01**: TaskLog database model stores structured logs with task_id, timestamp, level, message, correlation_id
-- [ ] **INFRA-02**: CostRecord database model stores token usage and costs with task_id, agent_type, tokens_in, tokens_out, cost_usd
-- [ ] **INFRA-03**: PlatformConnection database model stores Databricks/Fabric connection configs securely
-- [ ] **INFRA-04**: Remove hardcoded credentials from config.py, use SecretStr placeholders
-- [ ] **INFRA-05**: Alembic migration for new database models
+- [x] **INFRA-01**: TaskLog database model stores structured logs with task_id, timestamp, level, message, correlation_id
+- [x] **INFRA-02**: CostRecord database model stores token usage and costs with task_id, agent_type, tokens_in, tokens_out, cost_usd
+- [x] **INFRA-03**: PlatformConnection database model stores Databricks/Fabric connection configs securely
+- [x] **INFRA-04**: Remove hardcoded credentials from config.py, use SecretStr placeholders
+- [x] **INFRA-05**: Alembic migration for new database models
 
 ### EXCPT - Exception Handling Fixes
 
@@ -117,11 +117,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INFRA-01 | Phase 1 | Pending |
-| INFRA-02 | Phase 1 | Pending |
-| INFRA-03 | Phase 1 | Pending |
-| INFRA-04 | Phase 1 | Pending |
-| INFRA-05 | Phase 1 | Pending |
+| INFRA-01 | Phase 1 | Complete |
+| INFRA-02 | Phase 1 | Complete |
+| INFRA-03 | Phase 1 | Complete |
+| INFRA-04 | Phase 1 | Complete |
+| INFRA-05 | Phase 1 | Complete |
 | EXCPT-01 | Phase 1 | Pending |
 | EXCPT-02 | Phase 1 | Pending |
 | EXCPT-03 | Phase 1 | Pending |
@@ -174,8 +174,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SETT-08 | Phase 7 | Pending |
 
 **Coverage:**
-- v1 requirements: 45 total
-- Mapped to phases: 45
+- v1 requirements: 55 total
+- Mapped to phases: 55
 - Unmapped: 0 ✓
 
 ---
