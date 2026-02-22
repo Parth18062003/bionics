@@ -56,6 +56,7 @@ Recent decisions affecting current work:
 - [Phase 01-01]: Used ErrorSeverity enum matching existing RiskLevel pattern for consistency
 - [Phase 01-01]: Created category-based exception hierarchy with severity property for flexible error handling
 - [Phase 01-02]: Used specific exception types for orchestrator error handling with error_code/severity logging
+- [Phase 01-04]: Removed all sync wrappers from approval engine, standardized on async-only API
 
 ### Pending Todos
 
@@ -68,7 +69,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 01-02-PLAN.md (orchestrator exception handling)
+Stopped at: Completed 01-04-PLAN.md (sync wrapper removal)
 Resume file: None
 
 ---

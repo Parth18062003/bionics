@@ -21,7 +21,7 @@
 - [ ] **EXCPT-04**: Add logging to empty `pass` statements in agents/adapters/databricks_adapter.py
 - [ ] **EXCPT-05**: Add logging to empty `pass` statements in agents/adapters/fabric_adapter.py
 - [ ] **EXCPT-06**: Add logging to empty `pass` statements in agents/base.py
-- [ ] **EXCPT-07**: Remove ThreadPoolExecutor sync wrappers in safety/approval_engine.py, standardize on async
+- [x] **EXCPT-07**: Remove ThreadPoolExecutor sync wrappers in safety/approval_engine.py, standardize on async
 
 ### CHAT - Task Creation Chatbot
 
@@ -128,7 +128,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EXCPT-04 | Phase 1 | Pending |
 | EXCPT-05 | Phase 1 | Pending |
 | EXCPT-06 | Phase 1 | Pending |
-| EXCPT-07 | Phase 1 | Pending |
+| EXCPT-07 | Phase 1 | Complete |
 | CHAT-01 | Phase 2 | Pending |
 | CHAT-02 | Phase 2 | Pending |
 | CHAT-03 | Phase 2 | Pending |
