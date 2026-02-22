@@ -96,7 +96,8 @@ async def list_pending_approvals(
     engine: ApprovalEngine = Depends(get_approval_engine),
 ) -> list[ApprovalResponse]:
     """Return all pending approval requests."""
-    return [_record_to_response(r) for r in engine.pending_approvals]
+    pending = await engine.pending_approvals
+    return [_record_to_response(r) for r in pending]
 
 
 @router.get(
@@ -110,7 +111,7 @@ async def get_approval(
 ) -> ApprovalResponse:
     """Get a single approval record by ID."""
     try:
-        record = engine.get_record(approval_id)
+        record = await engine.get_record(approval_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Approval not found.")
     return _record_to_response(record)
@@ -136,7 +137,7 @@ async def approve(
     INV-01: This is the only path to unblock destructive operations.
     """
     try:
-        record = engine.approve(
+        record = await engine.approve(
             approval_id=approval_id,
             decided_by=current_user,
             reason=body.reason,
@@ -191,7 +192,7 @@ async def reject(
     The associated task execution is halted upon rejection.
     """
     try:
-        record = engine.reject(
+        record = await engine.reject(
             approval_id=approval_id,
             decided_by=current_user,
             reason=body.reason,
