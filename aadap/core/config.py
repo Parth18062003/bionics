@@ -49,7 +49,7 @@ class Settings(BaseSettings):
 
     # ── PostgreSQL (L2: Operational Store) ───────────────────────────────
     database_url: SecretStr = SecretStr(
-        "postgresql+asyncpg://parth:parth1806@localhost:5432/bionic"
+        "postgresql+asyncpg://your_user:your_password@localhost:5432/aadap"
     )
     db_pool_size: int = Field(default=10, ge=1, le=100)
     db_pool_overflow: int = Field(default=5, ge=0, le=50)
