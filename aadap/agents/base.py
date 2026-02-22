@@ -288,9 +288,10 @@ class BaseAgent(abc.ABC):
         """
         Register tools with the agent.
 
-        Default: no-op.  Subclasses override to register domain tools.
+        Default: no-op. Subclasses override to register domain tools.
+        This is intentionally empty - base agents have no default tools.
         """
-        pass
+        pass  # Intentional no-op: subclasses override to register tools
 
     def use_tool(self, tool_name: str, **kwargs: Any) -> Any:
         """

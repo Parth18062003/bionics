@@ -306,6 +306,10 @@ class FabricAdapter(PlatformAdapter):
             try:
                 return uuid.UUID(raw_task_id)
             except ValueError:
-                pass
+                logger.debug(
+                    "adapter.invalid_task_id_format",
+                    raw_task_id=str(raw_task_id)[:36],
+                    fallback="generating_uuid",
+                )
 
         return uuid.uuid4()
