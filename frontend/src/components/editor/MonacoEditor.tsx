@@ -1,12 +1,18 @@
 'use client';
 
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import type { editor } from 'monaco-editor';
 
 // Dynamic import to prevent SSR/hydration issues
 const MonacoEditorComponent = dynamic(
-  () => import('@monaco-editor/react').then((mod) => mod.default),
+  () => import('@monaco-editor/react').then((mod) => {
+    console.log('[MonacoEditor] Module loaded successfully:', mod);
+    return mod.default;
+  }).catch((err) => {
+    console.error('[MonacoEditor] Failed to load module:', err);
+    throw err;
+  }),
   {
     ssr: false,
     loading: () => (

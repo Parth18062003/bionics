@@ -38,10 +38,13 @@ function TypeBadge({ type }: { type: string }) {
     pipeline: '🔀 Pipeline',
     job_config: '⏱️ Job',
     ingestion_config: '📥 Ingestion',
+    generated_code: '💻 Generated',
     source_code: '💻 Code',
     optimized_code: '✨ Optimized',
     validation_report: '✅ Validation',
     optimization_report: '📊 Report',
+    decision_explanation: '🧠 Decision',
+    execution_result: '▶️ Execution',
   };
 
   return (

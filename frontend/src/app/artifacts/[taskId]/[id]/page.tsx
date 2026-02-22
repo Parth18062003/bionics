@@ -1,11 +1,71 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, Component, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getArtifact, getArtifactVersions, saveArtifactVersion } from '@/api/client';
 import type { ArtifactDetail, ArtifactVersionSummary } from '@/api/types';
 import { MonacoEditor, DiffViewer, EditorToolbar } from '@/components/editor';
+
+// ── Error Boundary ────────────────────────────────────────────────────────────
+
+class EditorErrorBoundary extends Component<
+    { children: ReactNode },
+    { hasError: boolean; error: Error | null }
+> {
+    constructor(props: { children: ReactNode }) {
+        super(props);
+        this.state = { hasError: false, error: null };
+    }
+
+    static getDerivedStateFromError(error: Error) {
+        console.error('[EditorErrorBoundary] Caught error:', error);
+        return { hasError: true, error };
+    }
+
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div style={{
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: 'var(--color-bg-primary)',
+                    padding: 'var(--space-xl)',
+                    color: 'var(--color-text-primary)',
+                }}>
+                    <div style={{
+                        padding: 'var(--space-lg)',
+                        background: 'var(--color-error-muted, #ef444420)',
+                        borderRadius: 'var(--radius-md)',
+                        maxWidth: 600,
+                    }}>
+                        <h3 style={{ color: 'var(--color-error)', marginBottom: 'var(--space-md)' }}>
+                            ⚠️ Editor Error
+                        </h3>
+                        <pre style={{
+                            fontSize: 'var(--font-size-sm)',
+                            whiteSpace: 'pre-wrap',
+                            color: 'var(--color-text-secondary)',
+                        }}>
+                            {this.state.error?.message || 'Unknown error occurred'}
+                        </pre>
+                        <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => window.location.reload()}
+                            style={{ marginTop: 'var(--space-md)' }}
+                        >
+                            🔄 Reload Page
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -60,10 +120,13 @@ function getArtifactTypeLabel(type: string): string {
         pipeline_definition: 'Pipeline Definition',
         job_config: 'Job Configuration',
         ingestion_config: 'Ingestion Config',
+        generated_code: 'Generated Code',
         source_code: 'Source Code',
         optimized_code: 'Optimized Code',
         validation_report: 'Validation Report',
         optimization_report: 'Optimization Report',
+        decision_explanation: 'Decision Explanation',
+        execution_result: 'Execution Result',
     };
     return labels[type] || type;
 }
@@ -196,6 +259,7 @@ export default function ArtifactViewPage() {
 
     // Check if this is a code-type artifact that should use Monaco editor
     const isCodeArtifact = artifact && [
+        'generated_code',
         'source_code',
         'optimized_code',
         'notebook',
@@ -203,6 +267,18 @@ export default function ArtifactViewPage() {
         'job_config',
         'ingestion_config',
     ].includes(artifact.artifact_type);
+
+    // Debug logging
+    useEffect(() => {
+        if (artifact) {
+            console.log('[ArtifactPage] Artifact loaded:', {
+                name: artifact.name,
+                artifact_type: artifact.artifact_type,
+                isCodeArtifact,
+                contentLength: artifact.content?.length ?? 0,
+            });
+        }
+    }, [artifact, isCodeArtifact]);
 
     if (loading) {
         return (
@@ -276,27 +352,29 @@ export default function ArtifactViewPage() {
 
                 {/* Editor area */}
                 <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-                    {isDiffView ? (
-                        <DiffViewer
-                            originalContent={originalContent}
-                            modifiedContent={editedContent}
-                            language={language}
-                            height="100%"
-                            readOnly={!isEditing}
-                            onModifiedChange={isEditing ? setEditedContent : undefined}
-                            showStats={true}
-                        />
-                    ) : (
-                        <MonacoEditor
-                            value={editedContent}
-                            onChange={isEditing ? setEditedContent : undefined}
-                            language={language}
-                            readOnly={!isEditing}
-                            height="100%"
-                            showMinimap={true}
-                            showLineNumbers={true}
-                        />
-                    )}
+                    <EditorErrorBoundary>
+                        {isDiffView ? (
+                            <DiffViewer
+                                originalContent={originalContent}
+                                modifiedContent={editedContent}
+                                language={language}
+                                height="100%"
+                                readOnly={!isEditing}
+                                onModifiedChange={isEditing ? setEditedContent : undefined}
+                                showStats={true}
+                            />
+                        ) : (
+                            <MonacoEditor
+                                value={editedContent}
+                                onChange={isEditing ? setEditedContent : undefined}
+                                language={language}
+                                readOnly={!isEditing}
+                                height="100%"
+                                showMinimap={true}
+                                showLineNumbers={true}
+                            />
+                        )}
+                    </EditorErrorBoundary>
                 </div>
             </div>
         );
