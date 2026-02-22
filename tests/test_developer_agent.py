@@ -31,6 +31,10 @@ def _valid_code_output() -> str:
         "language": "pyspark",
         "explanation": "Reads a CSV file from DBFS and displays the first 20 rows.",
         "dependencies": ["pyspark"],
+        "execution_mode": "notebook",
+        "input_parameters": {
+            "input_path": {"type": "string", "default": "/data/input.csv"},
+        },
     })
 
 

@@ -154,7 +154,8 @@ class TestBuildCorrectionPrompt:
             errors=["Missing field: 'x'"],
             raw_output='{"bad": true}',
         )
-        result = build_correction_prompt("original prompt", '{"bad": true}', error)
+        result = build_correction_prompt(
+            "original prompt", '{"bad": true}', error)
         assert "original prompt" in result
         assert "CORRECTION REQUIRED" in result
         assert "Missing field: 'x'" in result
@@ -186,6 +187,7 @@ class TestAgentPromptCollections:
         }),
         (DEVELOPER_PROMPTS, "code_generation", {
             "task_description": "Read CSV", "environment": "SANDBOX", "context": "None",
+            "runtime_version": "14.3",
         }),
         (VALIDATION_PROMPTS, "code_review", {
             "code": "print('hi')", "language": "python",

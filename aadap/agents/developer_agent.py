@@ -23,8 +23,8 @@ from aadap.agents.prompts.base import (
     validate_output,
 )
 from aadap.agents.prompts.developer import (
-    DEVELOPER_CODE_PROMPT,
     DEVELOPER_CODE_SCHEMA,
+    get_developer_prompt,
 )
 from aadap.agents.token_tracker import TokenBudgetExhaustedError
 from aadap.core.logging import get_logger
@@ -72,10 +72,13 @@ class DeveloperAgent(BaseAgent):
         Escalates on token exhaustion or persistent failures.
         """
         task_data = context.task_data
-        prompt = DEVELOPER_CODE_PROMPT.render({
+        platform = task_data.get("platform", "databricks")
+        prompt_template = get_developer_prompt(platform)
+        prompt = prompt_template.render({
             "task_description": task_data.get("description", ""),
             "environment": task_data.get("environment", "SANDBOX"),
             "context": task_data.get("context", "None"),
+            "runtime_version": task_data.get("runtime_version", "14.3"),
         })
 
         total_tokens = 0
@@ -108,20 +111,21 @@ class DeveloperAgent(BaseAgent):
                 )
 
             # Track tokens (INV-04)
-            try:
-                self._token_tracker.consume(response.tokens_used)
-            except TokenBudgetExhaustedError:
-                logger.warning(
-                    "developer.token_budget_exhausted",
-                    agent_id=self._agent_id,
-                    task_id=str(context.task_id),
-                    tokens_used=total_tokens + response.tokens_used,
-                )
-                return AgentResult(
-                    success=False,
-                    error="ESCALATE: Token budget exhausted (INV-04)",
-                    tokens_used=total_tokens + response.tokens_used,
-                )
+            if self._token_tracker:
+                try:
+                    self._token_tracker.consume(response.tokens_used)
+                except TokenBudgetExhaustedError:
+                    logger.warning(
+                        "developer.token_budget_exhausted",
+                        agent_id=self._agent_id,
+                        task_id=str(context.task_id),
+                        tokens_used=total_tokens + response.tokens_used,
+                    )
+                    return AgentResult(
+                        success=False,
+                        error="ESCALATE: Token budget exhausted (INV-04)",
+                        tokens_used=total_tokens + response.tokens_used,
+                    )
 
             total_tokens += response.tokens_used
 
