@@ -220,6 +220,40 @@ export interface ArtifactSummary {
 export interface ArtifactDetail extends ArtifactSummary {
     content: string | null;
     metadata: Record<string, unknown> | null;
+    version?: number;
+    parent_id?: string | null;
+    edit_message?: string | null;
+}
+
+// ── Artifact Version Types ─────────────────────────────────────────────
+
+export interface ArtifactVersionSummary {
+    id: string;
+    version: number;
+    created_at: string;
+    content_hash: string | null;
+    edit_message?: string | null;
+}
+
+export interface DiffLine {
+    old_line: number | null;
+    new_line: number | null;
+    content: string;
+    type: 'unchanged' | 'added' | 'removed';
+}
+
+export interface DiffResponse {
+    from_version: number;
+    to_version: number;
+    from_content: string | null;
+    to_content: string | null;
+    diff: DiffLine[];
+    stats: { added: number; removed: number; unchanged: number };
+}
+
+export interface ArtifactVersionCreateRequest {
+    content: string;
+    edit_message?: string;
 }
 
 // ── Health Types ───────────────────────────────────────────────────────

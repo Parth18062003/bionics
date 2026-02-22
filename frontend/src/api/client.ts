@@ -23,6 +23,9 @@ import type {
     ApprovalDecisionRequest,
     ArtifactSummary,
     ArtifactDetail,
+    ArtifactVersionSummary,
+    ArtifactVersionCreateRequest,
+    DiffResponse,
     HealthResponse,
     AgentCatalogEntry,
     ExecutionTriggerResponse,
@@ -181,6 +184,56 @@ export async function getArtifact(
 ): Promise<ArtifactDetail> {
     return apiFetch<ArtifactDetail>(
         `/api/v1/tasks/${taskId}/artifacts/${artifactId}`
+    );
+}
+
+// ── Artifact Version API ───────────────────────────────────────────────
+
+export async function getArtifactVersions(
+    taskId: string,
+    artifactId: string
+): Promise<ArtifactVersionSummary[]> {
+    return apiFetch<ArtifactVersionSummary[]>(
+        `/api/v1/tasks/${taskId}/artifacts/${artifactId}/versions`
+    );
+}
+
+export async function getArtifactVersion(
+    taskId: string,
+    artifactId: string,
+    version: number
+): Promise<ArtifactDetail> {
+    return apiFetch<ArtifactDetail>(
+        `/api/v1/tasks/${taskId}/artifacts/${artifactId}/versions/${version}`
+    );
+}
+
+export async function saveArtifactVersion(
+    taskId: string,
+    artifactId: string,
+    data: ArtifactVersionCreateRequest
+): Promise<ArtifactDetail> {
+    return apiFetch<ArtifactDetail>(
+        `/api/v1/tasks/${taskId}/artifacts/${artifactId}/versions`,
+        {
+            method: 'POST',
+            body: JSON.stringify(data),
+        }
+    );
+}
+
+export async function getArtifactDiff(
+    taskId: string,
+    artifactId: string,
+    fromVersion: number,
+    toVersion: number
+): Promise<DiffResponse> {
+    const params = new URLSearchParams({
+        from_version: String(fromVersion),
+        to_version: String(toVersion),
+    });
+    return apiFetch<DiffResponse>(
+        `/api/v1/tasks/${taskId}/artifacts/${artifactId}/diff?${params}`
     );
 }
 
