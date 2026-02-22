@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import './globals.css';
+import { ChatTrigger, ChatPanel } from '@/components/chat';
 
 const NAV_LINKS = [
   { href: '/dashboard',   label: 'Dashboard' },
@@ -143,6 +144,8 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const [chatOpen, setChatOpen] = useState(false);
+
   return (
     <html lang="en">
       <head>
@@ -164,6 +167,10 @@ export default function RootLayout({
         <main id="main-content" tabIndex={-1}>
           {children}
         </main>
+
+        {/* Chat FAB and Panel */}
+        <ChatTrigger onClick={() => setChatOpen(true)} isOpen={chatOpen} />
+        <ChatPanel isOpen={chatOpen} onClose={() => setChatOpen(false)} />
       </body>
     </html>
   );
