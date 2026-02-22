@@ -19,6 +19,8 @@ import {
   OutputVisualization,
 } from '@/components/ui';
 import { formatTimeWithSeconds } from '@/lib/utils';
+import { useLogs } from '@/hooks/useLogs';
+import type { TaskLog } from '@/types/log';
 
 type TabId = 'overview' | 'code' | 'output' | 'artifacts' | 'logs' | 'history';
 
@@ -441,43 +443,7 @@ export default function TaskDetailPage() {
               Execution Logs
             </h2>
             
-            {executions.length === 0 ? (
-              <p className="text-sm text-secondary">No execution logs available.</p>
-            ) : (
-              <div className="flex flex-col gap-md">
-                {executions.map((exec) => (
-                  <div
-                    key={exec.id}
-                    style={{
-                      padding: 'var(--space-md)',
-                      background: 'var(--color-bg-tertiary)',
-                      borderRadius: 'var(--radius-md)',
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: 'var(--font-size-xs)',
-                    }}
-                  >
-                    <div className="flex items-center justify-between mb-sm">
-                      <div className="flex items-center gap-sm">
-                        <Badge
-                          bg={exec.status === 'completed' ? 'var(--color-success-muted)' : 'var(--color-danger-muted)'}
-                          color={exec.status === 'completed' ? 'var(--color-success)' : 'var(--color-danger)'}
-                        >
-                          {exec.status.toUpperCase()}
-                        </Badge>
-                        <span className="text-xs text-secondary">{exec.environment}</span>
-                      </div>
-                      <span className="text-xs text-secondary">
-                        {exec.duration_ms != null && `${exec.duration_ms}ms · `}
-                        {formatTimeWithSeconds(exec.created_at)}
-                      </span>
-                    </div>
-                    {exec.job_id && (
-                      <div className="text-xs text-secondary">Job ID: {exec.job_id}</div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+            <LogsPanel taskId={taskId} />
           </div>
         )}
 
@@ -525,6 +491,141 @@ export default function TaskDetailPage() {
             )}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── Logs Panel Component ─────────────────────────────────────────────────────
+
+function LogsPanel({ taskId }: { taskId: string }) {
+  const { logs, total, isLoading, error } = useLogs({
+    taskId,
+    limit: 50,
+    autoRefresh: true,
+    refreshInterval: 5000,
+  });
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  if (isLoading && logs.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <div className="text-sm text-secondary">Loading logs...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-sm text-danger">
+        Failed to load logs: {error}
+      </div>
+    );
+  }
+
+  if (logs.length === 0) {
+    return (
+      <div className="text-sm text-secondary">
+        No logs recorded for this task yet. Logs will appear here as the task executes.
+      </div>
+    );
+  }
+
+  const toggleExpand = (logId: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(logId)) {
+        next.delete(logId);
+      } else {
+        next.add(logId);
+      }
+      return next;
+    });
+  };
+
+  return (
+    <div className="flex flex-col gap-sm">
+      <div className="text-xs text-secondary mb-sm">
+        Showing {logs.length} of {total} logs · Auto-refreshing every 5s
+      </div>
+      
+      <div className="flex flex-col gap-xs max-h-96 overflow-y-auto">
+        {logs.map((log) => {
+          const isExpanded = expanded.has(log.id);
+          const isLong = log.message.length > 150;
+          
+          return (
+            <div
+              key={log.id}
+              style={{
+                padding: 'var(--space-sm)',
+                background: 'var(--color-bg-tertiary)',
+                borderRadius: 'var(--radius-sm)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 'var(--font-size-xs)',
+              }}
+            >
+              <div className="flex items-start gap-sm">
+                {/* Level badge */}
+                <span
+                  style={{
+                    padding: '2px 6px',
+                    borderRadius: 'var(--radius-sm)',
+                    background:
+                      log.level === 'ERROR' ? 'var(--color-danger-muted)' :
+                      log.level === 'WARNING' ? 'var(--color-warning-muted)' :
+                      log.level === 'INFO' ? 'var(--color-info-muted)' :
+                      'var(--color-bg-secondary)',
+                    color:
+                      log.level === 'ERROR' ? 'var(--color-danger)' :
+                      log.level === 'WARNING' ? 'var(--color-warning)' :
+                      log.level === 'INFO' ? 'var(--color-info)' :
+                      'var(--color-text-secondary)',
+                    fontSize: '10px',
+                    fontWeight: 600,
+                  }}
+                >
+                  {log.level}
+                </span>
+                
+                {/* Timestamp */}
+                <span className="text-xs text-secondary flex-shrink-0">
+                  {new Date(log.timestamp).toLocaleTimeString()}
+                </span>
+                
+                {/* Source */}
+                {log.source && (
+                  <span className="text-xs text-secondary flex-shrink-0">
+                    [{log.source}]
+                  </span>
+                )}
+                
+                {/* Message */}
+                <span className="text-xs flex-1 break-words">
+                  {isExpanded || !isLong ? log.message : log.message.slice(0, 150) + '...'}
+                  {isLong && (
+                    <button
+                      onClick={() => toggleExpand(log.id)}
+                      className="ml-2 text-xs text-link hover:underline"
+                    >
+                      {isExpanded ? 'Show less' : 'Show more'}
+                    </button>
+                  )}
+                </span>
+                
+                {/* Correlation ID */}
+                {log.correlation_id && (
+                  <span
+                    className="text-xs text-secondary flex-shrink-0 px-1 rounded bg-bg-secondary"
+                    title={`Correlation ID: ${log.correlation_id}`}
+                  >
+                    🔗 {log.correlation_id.slice(0, 8)}
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
