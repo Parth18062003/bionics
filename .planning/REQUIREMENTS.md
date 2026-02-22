@@ -46,10 +46,10 @@
 
 ### EDIT - Code Editor
 
-- [ ] **EDIT-01**: Artifact detail page displays code with syntax highlighting (Python/PySpark)
+- [x] **EDIT-01**: Artifact detail page displays code with syntax highlighting (Python/PySpark)
 - [ ] **EDIT-02**: User can edit generated code in Monaco editor
-- [ ] **EDIT-03**: User can view diff between original and edited code
-- [ ] **EDIT-04**: User can save edited code as new artifact version
+- [x] **EDIT-03**: User can view diff between original and edited code
+- [x] **EDIT-04**: User can save edited code as new artifact version
 - [ ] **EDIT-05**: Monaco editor lazy-loads to prevent hydration issues
 - [ ] **EDIT-06**: Editor shows line numbers and minimap for navigation
 
@@ -144,10 +144,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | LOGS-06 | Phase 3 | Pending |
 | LOGS-07 | Phase 3 | Pending |
 | LOGS-08 | Phase 3 | Pending |
-| EDIT-01 | Phase 4 | Pending |
+| EDIT-01 | Phase 4 | Complete |
 | EDIT-02 | Phase 4 | Pending |
-| EDIT-03 | Phase 4 | Pending |
-| EDIT-04 | Phase 4 | Pending |
+| EDIT-03 | Phase 4 | Complete |
+| EDIT-04 | Phase 4 | Complete |
 | EDIT-05 | Phase 4 | Pending |
 | EDIT-06 | Phase 4 | Pending |
 | AGENT-01 | Phase 5 | Pending |
