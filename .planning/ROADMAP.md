@@ -51,8 +51,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 02-01: Chat backend service with SSE streaming and requirement extraction
-- [ ] 02-02: Chat frontend (dedicated page and slide-out panel)
+- [ ] 02-01-PLAN.md — Chat backend service with SSE streaming and requirement extraction
+- [ ] 02-02-PLAN.md — Chat frontend (dedicated page and slide-out panel)
 
 ### Phase 3: Logging
 **Goal**: Users can monitor and debug running tasks through comprehensive log visibility
