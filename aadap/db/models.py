@@ -24,6 +24,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     text,
@@ -125,6 +126,12 @@ class Task(Base):
         back_populates="task"
     )
     executions: Mapped[list["Execution"]] = relationship(back_populates="task")
+    task_logs: Mapped[list["TaskLog"]] = relationship(
+        back_populates="task", order_by="TaskLog.created_at"
+    )
+    cost_records: Mapped[list["CostRecord"]] = relationship(
+        back_populates="task", order_by="CostRecord.created_at"
+    )
 
     __table_args__ = (
         Index("ix_tasks_current_state", "current_state"),
@@ -420,4 +427,130 @@ class PlatformResource(Base):
         Index("ix_platform_resources_task_id", "task_id"),
         Index("ix_platform_resources_platform", "platform"),
         Index("ix_platform_resources_type", "resource_type"),
+    )
+
+
+# ── TaskLog (INFRA-01) ────────────────────────────────────────────────────
+
+
+class TaskLog(Base):
+    """
+    Structured log entries for task execution.
+
+    Provides persistent log storage with correlation IDs for tracing.
+    Used for debugging and audit trail purposes.
+    """
+
+    __tablename__ = "task_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    level: Mapped[str] = mapped_column(
+        String(16), nullable=False,
+        comment="DEBUG | INFO | WARNING | ERROR",
+    )
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    correlation_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True,
+        comment="Links to HTTP request correlation ID",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    task: Mapped["Task"] = relationship(back_populates="task_logs")
+
+    __table_args__ = (
+        Index("ix_task_logs_task_id", "task_id"),
+        Index("ix_task_logs_created_at", "created_at"),
+    )
+
+
+# ── CostRecord (INFRA-02) ──────────────────────────────────────────────────
+
+
+class CostRecord(Base):
+    """
+    Token usage and cost tracking per task.
+
+    Records LLM API calls with token counts and costs for
+    budget management and cost allocation.
+    """
+
+    __tablename__ = "cost_records"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    agent_type: Mapped[str] = mapped_column(
+        String(32), nullable=False,
+        comment="orchestrator | developer | validation | optimizer",
+    )
+    tokens_in: Mapped[int] = mapped_column(Integer, nullable=False)
+    tokens_out: Mapped[int] = mapped_column(Integer, nullable=False)
+    cost_usd: Mapped[float] = mapped_column(
+        Numeric(10, 6), nullable=False,
+        comment="Cost in USD with 6 decimal precision",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    task: Mapped["Task"] = relationship(back_populates="cost_records")
+
+    __table_args__ = (
+        Index("ix_cost_records_task_id", "task_id"),
+        Index("ix_cost_records_created_at", "created_at"),
+    )
+
+
+# ── PlatformConnection (INFRA-03) ──────────────────────────────────────────
+
+
+class PlatformConnection(Base):
+    """
+    Platform connection configuration for Databricks and Fabric.
+
+    Stores encrypted connection settings for external platform integrations.
+    Secrets are encrypted at the application level before storage.
+    """
+
+    __tablename__ = "platform_connections"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    platform: Mapped[str] = mapped_column(
+        String(32), nullable=False,
+        comment="databricks | fabric",
+    )
+    name: Mapped[str] = mapped_column(
+        String(128), nullable=False,
+        comment="Human-readable connection name",
+    )
+    config: Mapped[dict] = mapped_column(
+        JSONB, nullable=False,
+        comment="Encrypted connection configuration",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True,
+        comment="Whether this connection is currently active",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+    __table_args__ = (
+        Index("ix_platform_connections_platform", "platform"),
+        Index("ix_platform_connections_is_active", "is_active"),
     )
