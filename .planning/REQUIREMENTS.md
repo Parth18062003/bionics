@@ -15,8 +15,8 @@
 
 ### EXCPT - Exception Handling Fixes
 
-- [ ] **EXCPT-01**: Replace bare `except Exception` in orchestrator/graph.py with specific exception types
-- [ ] **EXCPT-02**: Replace bare `except Exception` in orchestrator/graph_executor.py with specific exception types
+- [x] **EXCPT-01**: Replace bare `except Exception` in orchestrator/graph.py with specific exception types
+- [x] **EXCPT-02**: Replace bare `except Exception` in orchestrator/graph_executor.py with specific exception types
 - [ ] **EXCPT-03**: Replace bare `except Exception` in services/execution.py with specific exception types
 - [ ] **EXCPT-04**: Add logging to empty `pass` statements in agents/adapters/databricks_adapter.py
 - [ ] **EXCPT-05**: Add logging to empty `pass` statements in agents/adapters/fabric_adapter.py
@@ -122,8 +122,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INFRA-03 | Phase 1 | Complete |
 | INFRA-04 | Phase 1 | Complete |
 | INFRA-05 | Phase 1 | Complete |
-| EXCPT-01 | Phase 1 | Pending |
-| EXCPT-02 | Phase 1 | Pending |
+| EXCPT-01 | Phase 1 | Complete |
+| EXCPT-02 | Phase 1 | Complete |
 | EXCPT-03 | Phase 1 | Pending |
 | EXCPT-04 | Phase 1 | Pending |
 | EXCPT-05 | Phase 1 | Pending |
