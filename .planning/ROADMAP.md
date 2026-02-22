@@ -81,8 +81,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 04-01: Artifact version storage and diff API
-- [ ] 04-02: Monaco editor frontend with diff view
+- [ ] 04-01-PLAN.md — Artifact version storage and diff API
+- [ ] 04-02-PLAN.md — Monaco editor frontend with diff view
 
 ### Phase 5: Agent Control
 **Goal**: Users can monitor and control agent behavior and task assignments
